@@ -1,3 +1,11 @@
+# Custom files
+labs/lab1/data/*
+labs/lab1/*.PNG
+labs/lab1/*.png
+labs/lab1/*.bmp
+labs/lab1/*.jpg
+labs/lab1/*.JPG
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
