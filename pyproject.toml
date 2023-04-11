@@ -7,10 +7,16 @@ readme = "README.md"
 packages = [{include = "ub_g12_compvis"}]
 
 [tool.poetry.dependencies]
-python = "^3.10"
+python = ">=3.10,<3.12"
 opencv-python = "^4.7.0.68"
 ipykernel = "^6.21.2"
 matplotlib = "^3.7.0"
+opencv-contrib-python = "^4.7.0.72"
+numpy = "^1.24.2"
+autopep8 = "^2.0.2"
+scipy = "^1.10.1"
+scikit-learn = "^1.2.2"
+scikit-image = "^0.20.0"
 
 
 [build-system]
