@@ -17,6 +17,7 @@ autopep8 = "^2.0.2"
 scipy = "^1.10.1"
 scikit-learn = "^1.2.2"
 scikit-image = "^0.20.0"
+display = "^1.0.0"
 
 [build-system]
 requires = ["poetry-core"]
