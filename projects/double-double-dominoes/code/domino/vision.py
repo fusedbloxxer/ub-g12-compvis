@@ -1,9 +1,11 @@
+from matplotlib.gridspec import GridSpec, GridSpecFromSubplotSpec
 from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
 import typing as t
 from typing import Tuple, List
 import numpy as np
 from numpy import ndarray
+import skimage as ski
 import cv2 as cv
 import abc
 
@@ -43,33 +45,28 @@ class PreProcessOperation(Operation[np.ndarray, np.ndarray]):
 
     def __call__(self, image: np.ndarray) -> np.ndarray:
         # Scale down images to speedup computations
-        image = cv.resize(image, None, fx=self.scale, fy=self.scale, interpolation=cv.INTER_LINEAR)
-
-        # From uint8 to float32
-        image = image.astype(np.float32) / 255.
-
-        # Stop
-        return image
+        return cv.resize(image, None, fx=self.scale, fy=self.scale, interpolation=cv.INTER_LINEAR)
 
 
-class PerspectiveOperation(Operation[t.Any, np.ndarray]):
-    def __init__(self, *args, show_image: bool=False, **kwargs) -> None:
+class PerspectiveOperation(Operation[np.ndarray, np.ndarray]):
+    def __init__(self, board_template: np.ndarray, *args, show_image: bool=False, **kwargs) -> None:
         super().__init__(*args, **kwargs)
 
         # Internal matching algorithm for finding good keypoint pairs
         self.__matcher_sift: FeatureMatching = SIFTFeatureMatching(show_image=show_image, min_lowe_ratio=0.55, max_lowe_ratio=0.8, min_matches=10)
         self.__matcher_orb: FeatureMatching = ORBFeatureMatching(show_image=show_image)
         self.matcher: FeatureMatching = self.__matcher_sift
+        self.template: np.ndarray = board_template
         self.show_image: bool = show_image
 
-    def __call__(self, target: np.ndarray, template: np.ndarray) -> np.ndarray:
+    def __call__(self, target: np.ndarray) -> np.ndarray:
         # Compute the location of relevant keypoints in both images using SIFT or ORB
         try:
             self.matcher = self.__matcher_sift
-            target_pts, template_pts = self.matcher(target, template)
+            target_pts, template_pts = self.matcher(target, self.template)
         except RuntimeError:
             self.matcher = self.__matcher_orb
-            target_pts, template_pts = self.matcher(target, template)
+            target_pts, template_pts = self.matcher(target, self.template)
 
         # Find the transformation from the target_pts to the template_pts
         M, mask = cv.findHomography(target_pts, template_pts, cv.RANSAC, 5.0, maxIters=3_000)
@@ -78,13 +75,13 @@ class PerspectiveOperation(Operation[t.Any, np.ndarray]):
         # Display the good matches
         if self.show_image is True:
             params_draw = dict(matchesMask=matchesMask, matchColor=(0, 255, 0), flags=cv.DRAW_MATCHES_FLAGS_NOT_DRAW_SINGLE_POINTS)
-            knn_image: np.ndarray = cv.drawMatches(target, self.matcher.target_kpts_, template, self.matcher.template_kpts_, self.matcher.relevant_matches_, None, **params_draw)
+            knn_image: np.ndarray = cv.drawMatches(target, self.matcher.target_kpts_, self.template, self.matcher.template_kpts_, self.matcher.relevant_matches_, None, **params_draw)
             plt.figure(figsize=(15, 15))
             plt.imshow(knn_image)
             plt.show()
 
         # Apply the H transformation over the input image
-        warped_target = cv.warpPerspective(target, M, template.shape, None)
+        warped_target = cv.warpPerspective(target, M, self.template.shape, None)
 
         # Display the result
         if self.show_image:
@@ -94,108 +91,108 @@ class PerspectiveOperation(Operation[t.Any, np.ndarray]):
         return warped_target
 
 
-class Image2GridOperation(Operation[np.ndarray, np.ndarray]):
-    def __init__(self, *args, show_image: bool=False, **kwargs) -> None:
+class Image2GridOperation(Operation[np.ndarray, t.Tuple[np.ndarray, np.ndarray, t.List[t.List[np.ndarray]]]]):
+    def __init__(self, grid_template: np.ndarray, *args, cell_splitter: str = 'hough', show_image: bool=False, **kwargs) -> None:
         super().__init__(*args, **kwargs)
+
+        # Create factories for later usage
+        self.window_cell_extractor_factory: t.Callable[[], CellExtractor] = lambda: WindowCellExtractor(**kwargs)
+        self.hough_cell_extractor_factory: t.Callable[[], CellExtractor] = lambda: HoughCellExtractor(show_image=show_image, **kwargs)
+
+        # Determine the method used to fetch the grid tiles
+        if cell_splitter == 'window':
+            self.cell_extractor_factory: t.Callable[[], CellExtractor] = self.window_cell_extractor_factory
+        elif cell_splitter == 'hough':
+            self.cell_extractor_factory: t.Callable[[], CellExtractor] = self.hough_cell_extractor_factory
+        else:
+            raise NotImplementedError()
+
+        # Other params
+        self.grid_template: np.ndarray = grid_template
         self.show_image: bool = show_image
 
-    def __call__(self, image: ndarray) -> ndarray:
+    def __call__(self, image: np.ndarray) -> t.Tuple[np.ndarray, np.ndarray, t.List[t.List[np.ndarray]]]:
+        # Unpack the argument
+        target_image, template_image = image, self.grid_template
+
         # Smooth before detecting edges to remove noise
-        image_blurred: np.ndarray = cv.GaussianBlur(image, (7, 7), 0)
-        # self.__show_blur(image_blurred)
+        template_image_blurred: np.ndarray = cv.GaussianBlur(template_image.copy(), (5, 5), 0)
+        target_image_blurred: np.ndarray = cv.GaussianBlur(target_image.copy(), (5, 5), 0)
+        self.__show_blur(template_image_blurred)
+        self.__show_blur(target_image_blurred)
 
         # Use Canny's Edge Detector to extract a binary image of edges
-        image_edges: np.ndarray = cv.Canny(image_blurred, threshold1=50, threshold2=100, apertureSize=3, L2gradient=True)
-        self.__show_edges(image, image_edges)
+        template_image_edges: np.ndarray = cv.Canny(template_image_blurred, threshold1=35, threshold2=90, apertureSize=3, L2gradient=True)
+        target_image_edges: np.ndarray = cv.Canny(target_image_blurred, threshold1=35, threshold2=90, apertureSize=3, L2gradient=True)
+        self.__show_edges(template_image, template_image_edges)
+        self.__show_edges(target_image, target_image_edges)
 
-        # Detect the outer layer
-        lines: t.List[t.List[t.List[float]]] = cv.HoughLines(image_edges, 1, np.pi / 180, 250, None)
+        # Template Matching
+        match: np.ndarray = cv.matchTemplate(target_image_edges, template_image_edges, cv.TM_SQDIFF)
+        min_val, max_val, min_loc, max_loc = cv.minMaxLoc(match)
 
-        # Display the initial lines that were found
-        image_edges_copy: np.ndarray = cv.cvtColor(image_edges.copy(), cv.COLOR_GRAY2BGR)
-        horizontal_lines: t.List[t.List[float]] = []
-        vertical_lines: t.List[t.List[float]] = []
-        good_lines: t.List[t.List[float]] = []
+        # Extract the grid borders
+        top_left: t.Tuple[int, int] = min_loc
+        bot_right: t.Tuple[int, int] = (top_left[0] + template_image.shape[1], top_left[1] + template_image.shape[0])
+        grid_region: np.ndarray = target_image[top_left[0]:bot_right[0], top_left[1]:bot_right[1]]
+        self.__show_match(target_image, grid_region, top_left, bot_right)
 
-        # 1st stage filtering - Keep only horizontal & vertical lines
-        for line in lines:
-            rho, theta = line[0]
-            angle: float = theta * 180 / np.pi
+        # Extract the grid cells using the given method otherwise fallback to window extractor
+        try:
+            cell_extractor: CellExtractor = self.cell_extractor_factory()
+            cells: t.List[t.List[np.ndarray]] = cell_extractor(grid_region)
+        except RuntimeError:
+            if self.show_image:
+                print('Fallback to WindowCellExtractor')
+            cell_extractor: CellExtractor = self.window_cell_extractor_factory()
+            cells: t.List[t.List[np.ndarray]] = cell_extractor(grid_region)
+        grid_patch: np.ndarray = self.__cells_to_image(cells)
+        self.__show_grid(grid_region, grid_patch)
+        return grid_region, grid_patch, cells
 
-            # From Polar to Cartesian
-            a:  float = np.cos(theta)
-            b:  float = np.sin(theta)
-            x0: float = a * rho
-            y0: float = b * rho
-            x1 = int(x0 + 1000 * -b)
-            y1 = int(y0 + 1000 *  a)
-            x2 = int(x0 - 1000 * -b)
-            y2 = int(y0 - 1000 *  a)
+    def __cells_to_image(self, cells: t.List[t.List[np.ndarray]]) -> np.ndarray:
+        nrows, ncols = len(cells), len(cells[0])
+        sizes: t.List[t.Tuple[int, int]] = [cell.shape for line in cells for cell in line]
+        cell_height: int = max(map(lambda x: x[0], sizes))
+        cell_width:  int = max(map(lambda x: x[1], sizes))
 
-            # Keep only vertical and horizontal lines
-            if (angle > 170 and angle < 190) or (angle < 10 or angle > 350):
-                horizontal_lines.append([x1, y1, x2, y2])
-            elif (angle > 80 and angle < 100) or (angle > 260 and angle < 280):
-                vertical_lines.append([x1, y1, x2, y2])
+        gap: int = 10
+        grid_size_y: int = nrows * cell_height + nrows * gap
+        grid_size_x: int = ncols *  cell_width + ncols * gap
+        grid_size: t.Tuple[int, int] = (grid_size_y, grid_size_x)
+        grid_patch: np.ndarray = np.zeros(grid_size, dtype=np.uint8)
 
-        good_lines = [*vertical_lines, *horizontal_lines]
-        for line in good_lines:
-            x1, y1, x2, y2 = line
-            cv.line(image_edges_copy, (x1, y1), (x2, y2), (0, 0, 255), 3, cv.LINE_AA)
+        for i in range(nrows):
+            for j in range(ncols):
+                grid_y = slice(i * (cell_height + gap), i * (cell_height + gap) + cells[i][j].shape[0])
+                grid_x = slice(j * ( cell_width + gap), j * ( cell_width + gap) + cells[i][j].shape[1])
+                grid_patch[grid_y, grid_x] = cells[i][j]
+        return grid_patch
 
-        cv.imshow('Lines Found from Edges', image_edges_copy)
-        cv.waitKey(0)
-        cv.destroyWindow('Lines Found from Edges')
-        return image_edges
+    def __show_grid(self, image: np.ndarray, grid_patch: np.ndarray) -> None:
+        if self.show_image:
+            fig: Figure = plt.figure(figsize=(20, 20))
+            top_level_grid = GridSpec(nrows=1, ncols=2, figure=fig)
 
-    # def __call__(self, image: ndarray) -> ndarray:
-    #     # Smooth before detecting edges to remove noise
-    #     image_blurred: np.ndarray = cv.GaussianBlur(image, (7, 7), 0)
-    #     # self.__show_blur(image_blurred)
+            ax_grid = fig.add_subplot(top_level_grid[0])
+            ax_grid.set_title('Initial Grid')
+            ax_grid.imshow(image, cmap='gray')
 
-    #     # Use Canny's Edge Detector to extract a binary image of edges
-    #     image_edges: np.ndarray = cv.Canny(image_blurred, threshold1=50, threshold2=100, apertureSize=3, L2gradient=True)
-    #     self.__show_edges(image, image_edges)
+            ax_grid_patch = fig.add_subplot(top_level_grid[1])
+            ax_grid_patch.imshow(grid_patch, cmap='gray', vmin=0, vmax=255)
+            ax_grid_patch.set_title('Grid Made of Patches')
+            plt.show()
 
-    #     # Detect the outer layer
-    #     lines: t.List[t.List[t.List[float]]] = cv.HoughLines(image_edges, 1, np.pi / 180, 250, None)
-
-    #     # Display the initial lines that were found
-    #     image_edges_copy: np.ndarray = cv.cvtColor(image_edges.copy(), cv.COLOR_GRAY2BGR)
-    #     horizontal_lines: t.List[t.List[float]] = []
-    #     vertical_lines: t.List[t.List[float]] = []
-    #     good_lines: t.List[t.List[float]] = []
-
-    #     # 1st stage filtering - Keep only horizontal & vertical lines
-    #     for line in lines:
-    #         rho, theta = line[0]
-    #         angle: float = theta * 180 / np.pi
-
-    #         # From Polar to Cartesian
-    #         a:  float = np.cos(theta)
-    #         b:  float = np.sin(theta)
-    #         x0: float = a * rho
-    #         y0: float = b * rho
-    #         x1 = int(x0 + 1000 * -b)
-    #         y1 = int(y0 + 1000 *  a)
-    #         x2 = int(x0 - 1000 * -b)
-    #         y2 = int(y0 - 1000 *  a)
-
-    #         # Keep only vertical and horizontal lines
-    #         if (angle > 170 and angle < 190) or (angle < 10 or angle > 350):
-    #             horizontal_lines.append([x1, y1, x2, y2])
-    #         elif (angle > 80 and angle < 100) or (angle > 260 and angle < 280):
-    #             vertical_lines.append([x1, y1, x2, y2])
-
-    #     good_lines = [*vertical_lines, *horizontal_lines]
-    #     for line in good_lines:
-    #         x1, y1, x2, y2 = line
-    #         cv.line(image_edges_copy, (x1, y1), (x2, y2), (0, 0, 255), 3, cv.LINE_AA)
-
-    #     cv.imshow('Lines Found from Edges', image_edges_copy)
-    #     cv.waitKey(0)
-    #     cv.destroyWindow('Lines Found from Edges')
-    #     return image_edges
+    def __show_match(self, image: np.ndarray, grid: np.ndarray, top_left: t.Tuple[int, int], bot_right: t.Tuple[int, int]) -> None:
+        if self.show_image:
+            _, ax = plt.subplots(1, 2, figsize=(15, 15))
+            image = image.copy()
+            cv.rectangle(image, top_left, bot_right, 255, 2)
+            ax[0].imshow(image, cmap='gray', vmin=0, vmax=255)
+            ax[0].set_title('Detected Region of Interest')
+            ax[1].imshow(grid, cmap='gray', vmin=0, vmax=255)
+            ax[1].set_title('Grid')
+            plt.show()
 
     def __show_blur(self, image_blurred: np.ndarray) -> None:
         if self.show_image:
@@ -210,6 +207,184 @@ class Image2GridOperation(Operation[np.ndarray, np.ndarray]):
             ax[0].set_title('Original Image')
             ax[1].imshow(edges, cmap='gray', vmin=0, vmax=255)
             ax[1].set_title('Edges in the Image')
+
+
+class Board2GridOperation(Operation[np.ndarray, t.Tuple[np.ndarray, np.ndarray, t.List[t.List[np.ndarray]]]]):
+    def __init__(self, board_template: np.ndarray, grid_template: np.ndarray, *args, show_image: bool=False, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+
+        # Internal ops
+        self.op_perspective = PerspectiveOperation(board_template=board_template, show_image=show_image)
+        self.op_img2grid    = Image2GridOperation(grid_template=grid_template, show_image=show_image)
+        self.op_preprocess  = PreProcessOperation(scale=0.35)
+
+    def __call__(self, image: ndarray) -> Tuple[ndarray, ndarray, List[List[ndarray]]]:
+        image = self.op_preprocess(image)
+        image = self.op_perspective(image)
+        return self.op_img2grid(image)
+
+
+class CellExtractor(abc.ABC):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__()
+
+    @abc.abstractmethod
+    def __call__(self, grid: np.ndarray) -> t.List[t.List[np.ndarray]]:
+        raise NotImplementedError()
+
+    @staticmethod
+    def factory(method: str, *args, **kwargs) -> 'CellExtractor':
+        if method == 'window':
+            return WindowCellExtractor(*args, **kwargs)
+        elif method == 'hough':
+            return HoughCellExtractor(*args, **kwargs)
+        else:
+            raise NotImplementedError()
+
+
+class HoughCellExtractor(CellExtractor):
+    def __init__(self,
+                 *args,
+                 show_image: bool=False,
+                 show_eliminations: bool=False,
+                 grid_gap_threshold: t.Tuple[float, float]=(39, 39),
+                 inner_gap: t.Tuple[int, int] = (1, 1),
+                 **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.show_image: bool = show_image
+        self.show_eliminations: bool = show_eliminations
+        self.grid_gap_threshold: t.Tuple[float, float] = grid_gap_threshold
+        self.inner_gap: t.Tuple[int, int] = inner_gap
+
+    def __call__(self, grid: ndarray) -> t.List[t.List[np.ndarray]]:
+        try:
+            # Filter out noise, apply thresholding and extract edges using Canny Algorithm
+            grid_edges: np.ndarray = self.__extract_edges(grid)
+
+            # Extract grid lines using Hough Transform
+            horizontal_lines, vertical_lines = self.__extract_lines(grid_edges)
+
+            # Ensure that a fixed amount of grid lines were found
+            if len(horizontal_lines) != 16 or len(vertical_lines) != 16:
+                raise RuntimeError('Wrong amount of grid lines were found using Hough Transform: {}, {}'.format(len(horizontal_lines), len(vertical_lines)))
+
+            # Extract the intersections where the cell contents lie
+            patches: t.List[t.List[np.ndarray]] = []
+            for i, row_idx in enumerate(range(len(horizontal_lines) - 1)):
+                patches.append([])
+                for j, col_idx in enumerate(range(len(vertical_lines) - 1)):
+                    curr_row: t.List[float] = horizontal_lines[row_idx]
+                    next_row: t.List[float] = horizontal_lines[row_idx + 1]
+                    y_min: float = curr_row[1] + self.inner_gap[1]
+                    y_max: float = next_row[1] - self.inner_gap[1]
+
+                    curr_col: t.List[float] = vertical_lines[col_idx]
+                    next_col: t.List[float] = vertical_lines[col_idx + 1]
+                    x_min: float = curr_col[0] + self.inner_gap[1]
+                    x_max: float = next_col[0] - self.inner_gap[1]
+
+                    patch: np.ndarray = grid[y_min: y_max, x_min: x_max]
+                    patches[-1].append(patch)
+            return patches
+        except Exception as e:
+            raise RuntimeError('Could not extract lines using Hough: {}'.format(e))
+
+    def __extract_lines(self, grid_edges: np.ndarray) -> t.Tuple[t.List[t.List[float]], t.List[t.List[float]]]:
+        # Obtain hough lines
+        lines: t.List[t.List[t.List[float]]] = cv.HoughLinesP(cv.dilate(grid_edges, None), 1, np.pi / 180, 250, None, minLineLength=200, maxLineGap=250)
+        horizontal_lines: t.List[t.List[float]] = []
+        vertical_lines: t.List[t.List[float]] = []
+
+        # 1st stage filtering - Keep only horizontal & vertical lines
+        for line in lines:
+            # Determine the type of line
+            x1, y1, x2, y2 = line[0]
+            angle: float = np.degrees(np.arctan2(y2 - y1, x2 - x1))
+            is_vertical:   bool = angle == -90
+            is_horizontal: bool = angle ==   0
+
+            # Group the lines based on their inclination
+            if is_horizontal:
+                horizontal_lines.append([x1, y1, x2, y2])
+                continue
+            if is_vertical:
+                vertical_lines.append([x1, y1, x2, y2])
+
+        # 2nd stage filtering - Eliminate close lines
+        def show_lines(lines: t.Any) -> None:
+            if self.show_image:
+                # Display the results
+                edges_copy: np.ndarray = cv.cvtColor(grid_edges.copy(), cv.COLOR_GRAY2BGR)
+                for line in lines:
+                    x1, y1, x2, y2 = line
+                    cv.line(edges_copy, (x1, y1), (x2, y2), (0, 0, 255), 2, cv.LINE_AA)
+                cv.imshow('Lines Found from Edges', edges_copy)
+                cv.waitKey(0)
+                cv.destroyWindow('Lines Found from Edges')
+        def eliminate_close_lines(lines: t.List[t.List[float]], axis: int) -> t.List[t.List[float]]:
+            # Collect similar lines in a bag and create a prototype (kmeans with 1 step)
+            unique: t.List[t.List[float]] = [lines[0]]
+            for i in range(1, len(lines)):
+                # Check the first point
+                if lines[i][axis] - unique[-1][axis] < self.grid_gap_threshold[axis]:
+                    continue
+                # Check the second point
+                if lines[i][2 + axis] - unique[-1][2 + axis] < self.grid_gap_threshold[axis]:
+                    continue
+                # Check the center
+                unique.append(lines[i])
+                if self.show_eliminations:
+                    show_lines(unique)
+            return unique
+
+        # Pass through each line in order as they come
+        horizontal_lines = sorted(horizontal_lines, key=lambda line: line[1])
+        vertical_lines = sorted(vertical_lines, key=lambda line: line[0])
+        show_lines([*horizontal_lines, *vertical_lines])
+
+        # Remove them based on the difference between the centers (works for both horiz & vertical)
+        horizontal_lines = eliminate_close_lines(horizontal_lines, axis=1)
+        vertical_lines = eliminate_close_lines(vertical_lines, axis=0)
+        show_lines([*horizontal_lines, *vertical_lines])
+        return horizontal_lines, vertical_lines
+
+    def __extract_edges(self, grid: np.ndarray) -> np.ndarray:
+        # Smooth the image to remove noise
+        grid_blur: np.ndarray = cv.GaussianBlur(grid.copy(), (3, 3), 0)
+        if self.show_image:
+            cv.imshow('Grid Blur', grid_blur)
+            cv.waitKey(0)
+            cv.destroyWindow('Grid Blur')
+
+        # Obtain another set of edges using Canny with different params
+        edges: np.ndarray = cv.Canny(grid_blur, threshold1=30, threshold2=90, apertureSize=3, L2gradient=True)
+        if self.show_image:
+            cv.imshow('Canny Edge Detection', edges)
+            cv.waitKey(0)
+            cv.destroyWindow('Canny Edge Detection')
+        return edges
+
+
+class WindowCellExtractor(CellExtractor):
+    def __init__(self,
+                 *args,
+                 grid_offset: t.Tuple[slice, slice] = (slice(1, None), slice(10, None)),
+                 cell_size: t.Tuple[int, int] = (40, 40),
+                 stride_offset: t.Tuple[int, int] = (5, 4),
+                 **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.cell_size: np.ndarray = np.array(cell_size)
+        self.grid_offset: t.Tuple[slice, slice] = grid_offset
+        self.step_size: np.ndarray = np.array([cell_size[0] + stride_offset[0], cell_size[1] + stride_offset[1]])
+
+    def __call__(self, grid: ndarray) -> t.List[t.List[np.ndarray]]:
+        cells: np.ndarray = ski.util.shape.view_as_windows(grid[self.grid_offset], self.cell_size.tolist(), self.step_size.tolist())
+        cells_as_list: t.List[t.List[np.ndarray]] = []
+        for i in range(cells.shape[0]):
+            cells_as_list.append([])
+            for j in range(cells.shape[1]):
+                cells_as_list[-1].append(cells[i][j])
+        return cells_as_list
 
 
 class FeatureMatching(abc.ABC):

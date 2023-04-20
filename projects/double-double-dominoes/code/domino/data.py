@@ -7,7 +7,7 @@ import abc
 import re
 
 from .util import folder_exists, keep_aspect_ratio
-
+from .vision import Board2GridOperation
 
 class Dataset(abc.ABC):
     def __init__(self) -> None:
@@ -49,7 +49,8 @@ class DDDHelpDataset(Dataset):
                  index: int | None = None,
                  dynamic_retrieval: bool=False,
                  scale: float=1.0,
-                 selection_type: str='pts') -> np.ndarray:
+                 selection_type: str='pts',
+                 template_type: str='board') -> np.ndarray:
         # By default the second helper image is the one used
         if index is None:
             index = 1
@@ -61,12 +62,25 @@ class DDDHelpDataset(Dataset):
         # Make sure there is always something to fallback onto
         hardcoded_fallback_template: np.ndarray = self[1][0]
         hardcoded_fallback_template = cv.resize(hardcoded_fallback_template, None, fx=scale, fy=scale, interpolation=cv.INTER_LINEAR)
-        hardcoded_fallback_pts: np.ndarray = np.array([
-            [0.16946779, 0.04930233],
-            [0.83263305, 0.05209302],
-            [0.83963585, 0.93209302],
-            [0.16386555, 0.94604651]
-        ]) * np.flip(hardcoded_fallback_template.shape)
+
+        # Handle two types of templates: board & grid
+        if template_type == 'grid':
+            relative_coordinates: np.ndarray = np.array([
+                [0.27380952, 0.17953488],
+                [0.73179272, 0.18139535],
+                [0.73739496, 0.8       ],
+                [0.27170868, 0.80651163]
+            ])
+        elif template_type == 'board':
+            relative_coordinates: np.ndarray = np.array([
+                [0.16946779, 0.04930233],
+                [0.83263305, 0.05209302],
+                [0.83963585, 0.93209302],
+                [0.16386555, 0.94604651]
+            ])
+        else:
+            raise ValueError(f'Invalid template type: {template_type}')
+        hardcoded_fallback_pts: np.ndarray = relative_coordinates * np.flip(hardcoded_fallback_template.shape)
         fallback: bool = False
 
         # Extract the absolute x, y coordinates of the corners
@@ -128,10 +142,10 @@ class DDDHelpDataset(Dataset):
         template_pts  = template_pts.astype(np.uint)
 
         # Length of each side
-        tl_line = int(np.ceil(np.sqrt(np.sum((template_pts[0] - template_pts[1]) ** 2))).astype(np.uint).item())
-        tr_line = int(np.ceil(np.sqrt(np.sum((template_pts[1] - template_pts[2]) ** 2))).astype(np.uint).item())
-        br_line = int(np.ceil(np.sqrt(np.sum((template_pts[2] - template_pts[3]) ** 2))).astype(np.uint).item())
-        bl_line = int(np.ceil(np.sqrt(np.sum((template_pts[3] - template_pts[0]) ** 2))).astype(np.uint).item())
+        tl_line = int(np.floor(np.sqrt(np.sum((template_pts[0] - template_pts[1]) ** 2))).astype(np.uint).item())
+        tr_line = int(np.floor(np.sqrt(np.sum((template_pts[1] - template_pts[2]) ** 2))).astype(np.uint).item())
+        br_line = int(np.floor(np.sqrt(np.sum((template_pts[2] - template_pts[3]) ** 2))).astype(np.uint).item())
+        bl_line = int(np.floor(np.sqrt(np.sum((template_pts[3] - template_pts[0]) ** 2))).astype(np.uint).item())
 
         # Approximate maximum-side square
         mx_line = int(np.max([tl_line, tr_line, br_line, bl_line]))
@@ -176,6 +190,7 @@ class DDDHelpDataset(Dataset):
     def __len__(self) -> int:
         return len(list(self.path_help.glob(self.pattern_image)))
 
+
 class DDDBonusGameDataset(GameDataset):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, task='bonus_task', **kwargs)
@@ -187,10 +202,16 @@ class DDDBonusGameDataset(GameDataset):
 
         self.task_list: np.ndarray = np.arange(1, 11)
 
-    def __getitem__(self, index: int) -> t.Tuple[np.ndarray, t.Optional[t.Tuple[int, t.List[t.Tuple[str, str]]]]]:
+    def __getitem__(self, index: int | slice) -> t.Tuple[np.ndarray, pd.DataFrame]:
+        if isinstance(index, int):
+            task_index: slice = slice(index, index + 1)
+        else:
+            task_index: slice = index
+
         # Retrieve a single image
-        image: np.ndarray | None = None
-        for image_path in self.path_input.glob(self.pattern_image):
+        image_list: t.List[np.ndarray] = []
+        misplacements: pd.DataFrame = pd.DataFrame()
+        for image_path in sorted(self.path_input.glob(self.pattern_image), key=lambda x: x.name):
             match: re.Match[str] | None = re.search(self.regex_image, image_path.name)
 
             if not match:
@@ -198,27 +219,33 @@ class DDDBonusGameDataset(GameDataset):
 
             try:
                 task: int
-                if (task := int(match.group('task'))) != self.task_list[index]:
+                if (task := int(match.group('task'))) not in self.task_list[task_index]:
                     continue
             except ValueError:
                 continue
 
-            image = cv.imread(str(image_path.absolute()), cv.IMREAD_GRAYSCALE)
+            image: np.ndarray = cv.imread(str(image_path.absolute()), cv.IMREAD_GRAYSCALE)
             image = keep_aspect_ratio(image, np.array([3_072, 4_080]))
-            break
+            image_list.append(image)
 
-        # Ensure the image is not missing
-        if image is None:
-            raise FileNotFoundError('Could not find image {}'.format(index))
+            contents: t.Dict[str, t.Any] = {
+                'img_name': pd.Series(data=[f'{match.group("task")}.jpg'], dtype=pd.StringDtype()),
+                'img_path': pd.Series(data=[self.path_input / f'{match.group("task")}.jpg'], dtype=pd.StringDtype())
+            }
+
+            df_misplacement = pd.DataFrame(contents)
+            misplacements = pd.concat([misplacements, df_misplacement])
+        misplacements.reset_index(inplace=True, drop=True)
+        images: np.ndarray = np.stack(image_list, axis=0)
 
         # In the case of testing no labels are available
         if not self.train:
-            return image, None
+            return images, misplacements
 
         # Retrieve the labels with misplacements
-        count: int = 0; misplacements: t.List[t.Tuple[str, str]] = []
+        index = 0
         assert self.path_truth is not None
-        for truth_path in self.path_truth.glob(self.pattern_truth):
+        for truth_path in sorted(self.path_truth.glob(self.pattern_truth), key=lambda x: x.name):
             match: re.Match[str] | None = re.search(self.regex_truth, truth_path.name)
 
             if not match:
@@ -226,7 +253,7 @@ class DDDBonusGameDataset(GameDataset):
 
             try:
                 task: int
-                if (task := int(match.group('task'))) != self.task_list[index]:
+                if (task := int(match.group('task'))) not in self.task_list[task_index]:
                     continue
             except ValueError:
                 continue
@@ -238,9 +265,21 @@ class DDDBonusGameDataset(GameDataset):
                 if len(entries) % 2 != 0:
                     raise ValueError('The label file format is wrong.')
 
+                misplacement_list: t.List[t.Tuple[str, str]] = []
                 for i in range(0, len(entries), 2):
-                    misplacements.append((entries[i], entries[i + 1]))
-        return image, (count, misplacements)
+                    misplacement_list.append((entries[i], entries[i + 1]))
+
+                if 'count' not in misplacements:
+                    misplacements.insert(0, column='count', value=pd.Series())
+                    misplacements.fillna(0, inplace=True)
+                if 'misplacements' not in misplacements:
+                    misplacements.insert(1, column='misplacements', value=pd.Series(dtype='object'))
+
+                # Insert the current values
+                misplacements.at[index, 'count'] = int(count)
+                misplacements.at[index, 'misplacements'] = misplacement_list
+                index += 1
+        return images, misplacements
 
     def __len__(self) -> int:
         return len(list(self.path_input.glob(self.pattern_image)))
@@ -313,6 +352,8 @@ class DDDRegularGameDataset(GameDataset):
 
             # Aggregate all necessary info in a DataFrame
             df_move: pd.DataFrame = pd.read_csv(move_path.absolute(), delimiter=' ', header=None, names=['img_name', 'player_turn'])
+            df_move['img_name'] = df_move['img_name'].astype(pd.StringDtype())
+            df_move.insert(0, column='img_path', value=df_move['img_name'].apply(lambda image_name: self.path_input / image_name).astype(pd.StringDtype()))
             df_move.insert(0, column='game', value=np.full_like(df_move.shape[0], game))
             df_move.insert(1, column='move', value=self.move_list)
             df_move.insert(len(df_move.columns), column='player', value=df_move['player_turn'].map(lambda p: 1 if p == 'player1' else 2))
@@ -375,4 +416,51 @@ class DDDGameDataset(object):
         self.dataset_help    = DDDHelpDataset(path=path / '..' / 'help')
         self.dataset_bonus   = DDDBonusGameDataset(path=path, train=self.train)
         self.dataset_regular = DDDRegularGameDataset(path=path, train=self.train)
+
+
+class DDDCellDataset(Dataset):
+    def __init__(self) -> None:
+        super().__init__()
+
+    @staticmethod
+    def create_cell_dataset(path: pb.Path, subset: DDDGameDataset, board2grid: Board2GridOperation) -> None:
+        try:
+            # Consider a subset
+            cell_dataset_path: pb.Path = path
+            cell_dataset_path.mkdir(parents=True, exist_ok=False)
+            cell_dataset: DDDGameDataset = subset
+        except FileExistsError:
+            print('Cell dataset already exists')
+            return
+
+        # Read all data
+        regular_images, regular_labels = cell_dataset.dataset_regular[:, :]
+        bonus_images, bonus_labels = cell_dataset.dataset_bonus[:]
+
+        # Conatenate all images & labels
+        cell_images: np.ndarray   = np.concatenate([regular_images, bonus_images], axis=0)
+        cell_labels: pd.DataFrame = pd.concat([regular_labels, bonus_labels], join='inner', ignore_index=True)
+        cell_labels_df = pd.DataFrame(columns=['original_img_path', 'cell_image_path', 'label'])
+
+        for i, (image, (_, labels)) in enumerate(zip(cell_images, cell_labels.iterrows())):
+            # Break the image into a matrix of cells
+            grid, grid_patch, grid_cells = board2grid(image)
+
+            original_image_path: pb.Path = pb.Path(labels['img_path'])
+            cell_image_dir_path: pb.Path = cell_dataset_path / f'grid_{i + 1}'
+            cell_image_dir_path.mkdir(parents=True, exist_ok=True)
+
+            cv.imwrite(str((cell_image_dir_path / 'grid.jpg').absolute()), grid)
+            cv.imwrite(str((cell_image_dir_path / 'original.jpg').absolute()), image)
+            cv.imwrite(str((cell_image_dir_path / 'grid_patch.jpg').absolute()), grid_patch)
+
+            for j in range(len(grid_cells)):
+                for k in range(len(grid_cells[0])):
+                    digit_row: str = str(j + 1)
+                    ascii_column: str = chr(ord('A') + k)
+                    cell_image_path: pb.Path = cell_image_dir_path / f'cell_{digit_row}{ascii_column}.jpg'
+                    cv.imwrite(str(cell_image_path.absolute()), grid_cells[j][k])
+                    cell_labels_df.loc[len(cell_labels_df)] = [str(original_image_path), str(cell_image_path), None]
+
+        cell_labels_df.to_csv(cell_dataset_path / 'labels.csv', sep=',', header=True)
 
