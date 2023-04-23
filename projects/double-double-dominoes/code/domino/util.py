@@ -1,4 +1,5 @@
 import pathlib as pb
+import typing as t
 import numpy as np
 import cv2 as cv
 
@@ -19,3 +20,14 @@ def keep_aspect_ratio(image: np.ndarray, size: np.ndarray) -> np.ndarray:
         image_flipped: np.ndarray = cv.flip(image_transposed, 1)
         return image_flipped.reshape(size)
     return image
+
+
+def same_cell_dim(grid_cells: t.List[t.List[np.ndarray]], dsize: t.Tuple[int, int]=(45, 45)) -> np.ndarray:
+    cells: t.List[np.ndarray] = []
+    for i in range(len(grid_cells)):
+        for j in range(len(grid_cells[0])):
+            grid_cell: np.ndarray = grid_cells[i][j]
+            grid_cell = cv.resize(grid_cell, dsize=dsize, interpolation=cv.INTER_LINEAR)
+            cells.append(grid_cell)
+    return np.stack(cells, axis=0)
+

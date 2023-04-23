@@ -1,3 +1,7 @@
+from sklearn.utils import compute_class_weight, compute_sample_weight
+import torch
+from torch.utils import data
+from torch import Tensor
 import pathlib as pb
 import pandas as pd
 import typing as t
@@ -8,10 +12,12 @@ import re
 
 from .util import folder_exists, keep_aspect_ratio
 from .vision import Board2GridOperation
+from .preprocess import DataPreprocess
+
 
 class Dataset(abc.ABC):
-    def __init__(self) -> None:
-        pass
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__()
 
 
 class GameDataset(Dataset):
@@ -405,7 +411,7 @@ class DDDRegularGameDataset(GameDataset):
         return len(list(self.path_input.glob(self.pattern_move)))
 
 
-class DDDGameDataset(object):
+class DDDGameDataset(Dataset):
     def __init__(self, path: pb.Path, *args, train: bool=True, **kwargs) -> None:
         super().__init__()
 
@@ -418,22 +424,54 @@ class DDDGameDataset(object):
         self.dataset_regular = DDDRegularGameDataset(path=path, train=self.train)
 
 
-class DDDCellDataset(Dataset):
-    def __init__(self) -> None:
+class DDDCellDataset(Dataset, data.Dataset):
+    def __init__(self, path: pb.Path, *args, **kwargs) -> None:
         super().__init__()
 
+        self.path: pb.Path = path
+        self.path_labels: pb.Path = self.path / 'labels.csv'
+        self.labels: pd.DataFrame = pd.read_csv(self.path_labels, index_col=False)
+        self.labels = self.labels.drop('Unnamed: 0', axis=1)
+        self.labels = self.labels.dropna().reset_index(drop=True)
+        self.labels['label'] = self.labels['label'].astype(np.int64)
+
+        if not self.path_labels.exists():
+            raise FileNotFoundError(str(self.path_labels.absolute()))
+        if not self.path_labels.is_file():
+            raise Exception('Is not a file: {}'.format(str(self.path_labels.absolute())))
+
+    def __getitem__(self, index: int | slice) -> t.Tuple[np.ndarray, np.ndarray]:
+        if isinstance(index, int):
+            index_data: t.List[int] | slice = [index]
+        else:
+            index_data: t.List[int] | slice = index
+
+        # Select the relevant entries
+        labels: np.ndarray = self.labels.iloc[index_data]['label'].to_numpy(dtype=np.int32)
+
+        # Read all images in-memory
+        image_paths: pd.Series = self.labels.iloc[index_data]['cell_image_path']
+        image_list: t.List[np.ndarray] = []
+        for image_path in image_paths:
+            image: np.ndarray = cv.imread(image_path, cv.IMREAD_GRAYSCALE)
+            image = cv.resize(image, dsize=(45, 45), interpolation=cv.INTER_LINEAR)
+            image_list.append(image)
+        return np.stack(image_list, axis=0), labels
+
+    def __len__(self) -> int:
+        return len(self.labels)
+
     @staticmethod
-    def create_cell_dataset(path: pb.Path, subset: DDDGameDataset, board2grid: Board2GridOperation) -> None:
-        try:
-            # Consider a subset
-            cell_dataset_path: pb.Path = path
-            cell_dataset_path.mkdir(parents=True, exist_ok=False)
-            cell_dataset: DDDGameDataset = subset
-        except FileExistsError:
-            print('Cell dataset already exists')
+    def create_cell_dataset(path: pb.Path, subset: DDDGameDataset, board2grid: Board2GridOperation, overwrite_imgs: bool=False, overwrite_csv: bool=False) -> None:
+        # Consider a subset path
+        cell_dataset_path: pb.Path = path
+        if cell_dataset_path.exists() and not overwrite_imgs:
+            print('Cell dataset already exists: {}'.format(path))
             return
 
         # Read all data
+        cell_dataset: DDDGameDataset = subset
+        cell_dataset_path.mkdir(parents=True, exist_ok=False)
         regular_images, regular_labels = cell_dataset.dataset_regular[:, :]
         bonus_images, bonus_labels = cell_dataset.dataset_bonus[:]
 
@@ -462,5 +500,38 @@ class DDDCellDataset(Dataset):
                     cv.imwrite(str(cell_image_path.absolute()), grid_cells[j][k])
                     cell_labels_df.loc[len(cell_labels_df)] = [str(original_image_path), str(cell_image_path), None]
 
-        cell_labels_df.to_csv(cell_dataset_path / 'labels.csv', sep=',', header=True)
+        # Create or overwrite labels file
+        csv_path: pb.Path = cell_dataset_path / 'labels.csv'
+        if not csv_path.exists() or overwrite_csv:
+            cell_labels_df.to_csv(csv_path, sep=',', header=True)
+
+
+class DDDCellDatasetTorch(Dataset, data.Dataset):
+    def __init__(self, path: pb.Path, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.cell_dataset = DDDCellDataset(path=path, *args, **kwargs)
+        self.preprocess = DataPreprocess()
+
+    def __getitem__(self, index: int | slice) -> t.Tuple[Tensor, Tensor]:
+        # Load the image in-memory and apply simple preprocessing
+        images, labels = self.cell_dataset[index]
+        images = self.preprocess.forward(images)
+
+        # When called with a single index it should avoid returning a batch dimension
+        if isinstance(index, int):
+            images = images.squeeze(0)
+            labels = labels.item()
+
+        # Always return tensors
+        return images, torch.tensor(labels)
+
+    def __len__(self) -> int:
+        return len(self.cell_dataset)
+
+
+def compute_sample_class_weights(labels: Tensor) -> t.Tuple[Tensor, Tensor]:
+    classes: Tensor = labels.unique()
+    class_weights = torch.tensor(compute_class_weight('balanced', classes=classes.numpy(), y=labels.numpy()), dtype=torch.float32)
+    sample_weights = torch.tensor(compute_sample_weight('balanced', y=labels.numpy()), dtype=torch.float32)
+    return sample_weights, class_weights
 

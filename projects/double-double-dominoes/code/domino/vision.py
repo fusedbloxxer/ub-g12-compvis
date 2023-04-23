@@ -6,8 +6,13 @@ from typing import Tuple, List
 import numpy as np
 from numpy import ndarray
 import skimage as ski
+import torchvision as tv
+import torch
 import cv2 as cv
 import abc
+
+from .model import CellClassifier
+from .util import same_cell_dim
 
 
 T_OUT = t.TypeVar('T_OUT')
@@ -210,18 +215,61 @@ class Image2GridOperation(Operation[np.ndarray, t.Tuple[np.ndarray, np.ndarray, 
 
 
 class Board2GridOperation(Operation[np.ndarray, t.Tuple[np.ndarray, np.ndarray, t.List[t.List[np.ndarray]]]]):
-    def __init__(self, board_template: np.ndarray, grid_template: np.ndarray, *args, show_image: bool=False, **kwargs) -> None:
+    def __init__(self, board_template: np.ndarray, grid_template: np.ndarray, *args, cell_splitter: str='hough', show_image: bool=False, **kwargs) -> None:
         super().__init__(*args, **kwargs)
 
         # Internal ops
         self.op_perspective = PerspectiveOperation(board_template=board_template, show_image=show_image)
-        self.op_img2grid    = Image2GridOperation(grid_template=grid_template, show_image=show_image)
+        self.op_img2grid    = Image2GridOperation(grid_template=grid_template, show_image=show_image, cell_splitter=cell_splitter)
         self.op_preprocess  = PreProcessOperation(scale=0.35)
 
     def __call__(self, image: ndarray) -> Tuple[ndarray, ndarray, List[List[ndarray]]]:
+        self.image_: np.ndarray = image
         image = self.op_preprocess(image)
         image = self.op_perspective(image)
         return self.op_img2grid(image)
+
+
+class Board2MatrixOpeation(Operation[np.ndarray, np.ndarray]):
+    def __init__(self, board_template: np.ndarray, grid_template: np.ndarray, cell_classifier: CellClassifier, *args, cell_splitter: str='hough', show_matrix: bool=False, show_image: bool=False, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+
+        # Internal ops
+        self.op_board2grid: Board2GridOperation = Board2GridOperation(board_template=board_template, grid_template=grid_template, cell_splitter=cell_splitter, show_image=show_image)
+        self.cell_classifier: CellClassifier = cell_classifier
+        self.show_matrix: bool = show_matrix
+
+    def __call__(self, image: ndarray) -> ndarray:
+        self.grid_region_, self.grid_patch_, self.grid_cells_ = self.op_board2grid(image)
+        self.grid_matrix_: np.ndarray = self.cell_classifier(self.grid_cells_)
+        self.__show_matrix_prediction(self.grid_region_, self.grid_cells_, self.grid_matrix_)
+        return self.grid_matrix_
+
+    def __show_matrix_prediction(self, grid_image: np.ndarray, grid_cells: t.List[t.List[np.ndarray]], grid_matrix: np.ndarray) -> None:
+        if not self.show_matrix:
+            return
+        # Ensure all grid cells are of the same size
+        aligned_grid_cells = same_cell_dim(grid_cells, dsize=(45, 45)).reshape((*grid_matrix.shape, 45, 45))
+
+        # Present the initial grid along the predicted cell contents
+        f, ax = plt.subplots(1, 2, figsize=(15, 15))
+
+        # Show the original grid
+        ax[0].imshow(grid_image, cmap='gray', vmin=0, vmax=255)
+        ax[0].set_title('Board Grid')
+
+        # Show the predicted values
+        cells: t.List[torch.Tensor] = []
+        for i in range(grid_matrix.shape[0]):
+            for j in range(grid_matrix.shape[1]):
+                grid_cell: np.ndarray = cv.cvtColor(aligned_grid_cells[i][j].copy(), cv.COLOR_GRAY2BGR)
+                grid_cell = cv.putText(grid_cell, str(grid_matrix[i][j]), (np.array(grid_cell.shape[:2]) // 2).tolist(), cv.FONT_HERSHEY_COMPLEX, 0.75, (204, 0, 0), 2)
+                cells.append(torch.from_numpy(grid_cell))
+        matrix_cells = torch.stack(cells, dim=-1).permute((3, 2, 0, 1))
+        matrix_image = tv.utils.make_grid(matrix_cells, nrow=grid_matrix.shape[0], padding=3)
+        ax[1].imshow(matrix_image.permute((1, 2, 0)), cmap='gray', vmin=0, vmax=255)
+        ax[1].set_title('Matrix')
+        plt.show()
 
 
 class CellExtractor(abc.ABC):
