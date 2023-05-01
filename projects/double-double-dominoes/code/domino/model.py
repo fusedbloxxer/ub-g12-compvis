@@ -169,11 +169,12 @@ class RandomForestCellClassifier(CellClassifier):
 
 
 class PretrainedCellClassifier(CellClassifier):
-    def __init__(self, model: ResNetCellClassifier, *args, **kwargs) -> None:
+    def __init__(self, model: ResNetCellClassifier, num_workers: int = 0, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.trainer = pl.Trainer(default_root_dir=pb.Path('..', '.model'))
         self.preprocess: nn.Module = DataPreprocess()
         self.model: ResNetCellClassifier = model
+        self.num_workers: int = num_workers
 
     def __call__(self, grid_cells: t.List[t.List[np.ndarray]]) -> np.ndarray:
         # Ensure all sizes match
@@ -184,7 +185,7 @@ class PretrainedCellClassifier(CellClassifier):
 
         # Avoid OutOfMemory GPU errors by using a dataset
         cells_dataset: data.Dataset   = data.TensorDataset(cells_rgb)
-        cells_loader: data.DataLoader = data.DataLoader(cells_dataset, batch_size=8, num_workers=4)
+        cells_loader: data.DataLoader = data.DataLoader(cells_dataset, batch_size=8, num_workers=self.num_workers)
 
         # Infer what the cells represent
         outputs: t.List[t.Any] | None = self.trainer.predict(self.model, dataloaders=cells_loader)
@@ -195,8 +196,8 @@ class PretrainedCellClassifier(CellClassifier):
         return y_pred.numpy().reshape((len(grid_cells), len(grid_cells[0]))).astype(np.int32)
 
     @staticmethod
-    def load_checkpoint(path: pb.Path) -> 'PretrainedCellClassifier':
-        return PretrainedCellClassifier(ResNetCellClassifier.load_from_checkpoint(path))
+    def load_checkpoint(path: pb.Path, *args, **kwargs) -> 'PretrainedCellClassifier':
+        return PretrainedCellClassifier(ResNetCellClassifier.load_from_checkpoint(path), *args, **kwargs)
 
 
 class BalancedAccuracy(tm.Metric):

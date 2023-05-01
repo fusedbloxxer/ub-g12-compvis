@@ -25,14 +25,14 @@ class GameDataset(Dataset):
         super().__init__()
 
         # Argument validation
-        self.train = train
-        self.task = task
+        self.task: str = task
+        self.train: bool = train
         assert self.task in ['bonus_task', 'regular_task'], f'Invalid task type, found {self.task}'
 
         # Ensure all given directories exist
         self.path: pb.Path = path
         self.path_input: pb.Path
-        self.path_truth: t.Optional[pb.Path]
+        self.path_truth: t.Optional[pb.Path] = None
         for suffix in ['_input'] + ([] if not self.train else ['_truth']):
             assert folder_exists(self.path / suffix[1:] / self.task)
             setattr(self, 'path' + suffix, self.path / suffix[1:] / self.task)
@@ -307,7 +307,7 @@ class DDDRegularGameDataset(GameDataset):
 
     def __getitem__(self, game_index: t.Tuple[int | slice, int | slice] | int | slice) -> t.Tuple[np.ndarray, pd.DataFrame]:
         if isinstance(game_index, int):
-            game_index = (0, slice(None))
+            game_index = (game_index, slice(None))
         if isinstance(game_index, slice):
             game_index = (game_index, slice(None))
         if isinstance(game_index[0], int):
