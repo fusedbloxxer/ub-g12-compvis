@@ -158,8 +158,9 @@ class Game(object):
 
 
 class GameState(object):
-    def __init__(self, game_board: 'GameBoard', score_track: 'GameScoreTrack', *args, game_move: t.Optional['GameMove'] = None, **kwargs) -> None:
+    def __init__(self, index: int, game_board: 'GameBoard', score_track: 'GameScoreTrack', *args, game_move: t.Optional['GameMove'] = None, **kwargs) -> None:
         super().__init__()
+        self.index: int = index
         self.game_board: GameBoard = game_board
         self.score_track: GameScoreTrack = score_track
         self.game_move: t.Optional[GameMove] = game_move
@@ -176,7 +177,7 @@ class GameState(object):
 
         # Find out who the main and other player are
         main_player: str  = 'player' + str(player_move.loc['player'])
-        other_player: str = 'player' + str(GameState.other_player(main_player))
+        other_player: str = str(GameState.other_player(main_player))
 
         # Create the game move using the computed score and placement
         game_move: GameMove = GameMove(main_score=scores[0], main_player=main_player, other_score=scores[1], other_player=other_player, domino=domino, positions=pos)
@@ -184,13 +185,105 @@ class GameState(object):
         new_board: GameBoard = self.game_board + game_move
 
         # Create a new game state using immutability
-        return GameState(game_board=new_board, score_track=new_score_track, game_move=game_move)
+        return GameState(index=self.index + 1, game_board=new_board, score_track=new_score_track, game_move=game_move)
+
+    def matrix2move(self, matrix: np.ndarray) -> t.Tuple['GameDomino', t.Tuple['GamePosition', 'GamePosition']]:
+        unit_matrix: np.ndarray = (matrix != self.game_board.value()).astype(np.int32)
+        unit_matrix = self.remove_invalid_cells(matrix, unit_matrix)
+        unit_matrix = self.remove_isolated_cells(unit_matrix)
+
+        if self.index == 0:
+            unit_matrix: np.ndarray = self.remove_non_centered_cells(unit_matrix)
+
+        dominoes: t.List[t.Tuple[GameDomino, t.Tuple[GamePosition, GamePosition]]] = self.detect_dominoes(matrix, unit_matrix)
+        dominoes = self.remove_seen_dominoes(dominoes)
+        dominoes = self.remove_invalid_dominoes(dominoes)
+
+        print(unit_matrix)
+        print(matrix)
+        print(self.game_board.value())
+        print(str(dominoes[0][0]), str(dominoes[0][1][0]), ' ', str(dominoes[0][1][1]))
+        assert len(dominoes) == 1, f'A single domino may be predicted! Found: {len(dominoes)}'  # TODO: remove this
+        return dominoes[0]
+
+    def detect_dominoes(self, matrix: np.ndarray, unit_matrix: np.ndarray) -> t.List[t.Tuple['GameDomino', t.Tuple['GamePosition', 'GamePosition']]]:
+        # Keep only dominoes that can exist to minimize invalid moves
+        dominoes: t.List[t.Tuple['GameDomino', t.Tuple['GamePosition', 'GamePosition']]] = []
+
+        # Compute the list of all possible dominoes (valid & invalid)
+        pos: t.List[t.Tuple[GamePosition, GamePosition]] = []
+        for i in range(unit_matrix.shape[0]):
+            for j in range(unit_matrix.shape[1]):
+                if unit_matrix[i][j] == 0:
+                    continue
+                if j < unit_matrix.shape[1] - 1 and unit_matrix[i][j + 1] == 1:
+                    pos.append((GamePosition(index=(i, j)), GamePosition(index=(i, j + 1))))
+                if i < unit_matrix.shape[0] - 1 and unit_matrix[i + 1][j] == 1:
+                    pos.append((GamePosition(index=(i, j)), GamePosition(index=(i + 1, j))))
+
+        # Pass through each domino position and keep only the valid ones
+        for i, ((i1, j1), (i2, j2)) in enumerate(pos):
+            if matrix[i1][j1] >= matrix[i2][j2]:
+                domino: GameDomino = GameDomino((matrix[i1][j1], matrix[i2][j2]))
+                head_pos: GamePosition = pos[i][0]
+                tail_pos: GamePosition = pos[i][1]
+            else:
+                domino: GameDomino = GameDomino((matrix[i2][j2], matrix[i1][j1]))
+                head_pos: GamePosition = pos[i][1]
+                tail_pos: GamePosition = pos[i][0]
+            dominoes.append((domino, (head_pos, tail_pos)))
+        return dominoes
+
+    def remove_invalid_dominoes(self, dominoes: t.List[t.Tuple['GameDomino', t.Tuple['GamePosition', 'GamePosition']]]) -> t.List[t.Tuple['GameDomino', t.Tuple['GamePosition', 'GamePosition']]]:
+        return dominoes
+
+    def remove_seen_dominoes(self, dominoes: t.List[t.Tuple['GameDomino', t.Tuple['GamePosition', 'GamePosition']]]) -> t.List[t.Tuple['GameDomino', t.Tuple['GamePosition', 'GamePosition']]]:
+        return [(domino, pos) for domino, pos in dominoes if domino in self.game_board.dominoes_off]
+
+    def remove_non_centered_cells(self, unit_matrix: np.ndarray) -> np.ndarray:
+        unit_matrix = unit_matrix.copy()
+        for i in range(unit_matrix.shape[0]):
+            for j in range(unit_matrix.shape[1]):
+                if unit_matrix[i][j] != 1:
+                    continue
+                if (i, j) in {(6, 7), (7, 8), (8, 7), (7, 6), (7, 7)}:
+                    continue
+                unit_matrix[i][j] = 0
+        return unit_matrix
+
+    def remove_isolated_cells(self, unit_matrix: np.ndarray) -> np.ndarray:
+        unit_matrix = unit_matrix.copy()
+        for i in range(unit_matrix.shape[0]):
+            for j in range(unit_matrix.shape[1]):
+                if unit_matrix[i][j] != 1:
+                    continue
+                if i > 0 and unit_matrix[i - 1][j] == 1:
+                    continue
+                if i < unit_matrix.shape[0] - 1 and unit_matrix[i + 1][j] == 1:
+                    continue
+                if j > 0 and unit_matrix[i][j - 1] == 1:
+                    continue
+                if j < unit_matrix.shape[1] - 1 and unit_matrix[i][j + 1] == 1:
+                    continue
+                unit_matrix[i][j] = 0
+        return unit_matrix
+
+    def remove_invalid_cells(self, matrix: np.ndarray, unit_matrix: np.ndarray) -> np.ndarray:
+        unit_matrix = unit_matrix.copy()
+        for i in range(unit_matrix.shape[0]):
+            for j in range(unit_matrix.shape[1]):
+                if unit_matrix[i][j] != 1:
+                    continue
+                if matrix[i][j] == 7:
+                    matrix[i][j] = 0
+                    continue
+                if not self.game_board[i][j].is_empty(): # TODO: should also do majority voting?
+                    matrix[i][j] = 0
+                    continue
+        return unit_matrix
 
     def move2scores(self, domino: 'GameDomino', pos: t.Tuple['GamePosition', 'GamePosition']) -> t.Tuple[int, int]:
         return 0, 0
-
-    def matrix2move(self, matrix: np.ndarray) -> t.Tuple['GameDomino', t.Tuple['GamePosition', 'GamePosition']]:
-        return (None, None)
 
     @staticmethod
     def other_player(player: str) -> str:
@@ -206,7 +299,7 @@ class GameState(object):
         # Initialize the first game state (beginning of the game)
         game_board: GameBoard = GameBoard.empty()
         score_track: GameScoreTrack = GameScoreTrack.empty()
-        return GameState(game_board=game_board, score_track=score_track, game_move=None)
+        return GameState(index=0, game_board=game_board, score_track=score_track, game_move=None)
 
 
 class GameScoreTrack(object):
@@ -291,6 +384,9 @@ class GameDomino(object):
             return False
         return self.head == other.head and self.tail == other.tail
 
+    def __str__(self) -> str:
+        return f'[{self.head}-{self.tail}]'
+
 
 class GamePosition(object):
     def __init__(self,
@@ -345,6 +441,9 @@ class GamePosition(object):
 
     def __hash__(self) -> int:
         return hash(self.index)
+
+    def __str__(self) -> str:
+        return f'{self.index[0]}{self.index[1]}'
 
 
 class GameMove(object):
@@ -406,44 +505,47 @@ class GameBoard(object):
 
     def __init__(self,
                  grid: t.List[t.List['GameBoardCell']],
-                 dominoes_on: t.Dict[GameDomino, t.Tuple[GamePosition, GamePosition]],
-                 dominoes_off: t.Set[GameDomino], *args, **kwargs) -> None:
+                 dominoes_on: t.Dict[GameDomino, t.List[t.Tuple[GamePosition, GamePosition]]],
+                 dominoes_off: t.List[GameDomino], *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self.dominoes_on: t.Dict[GameDomino, t.Tuple[GamePosition, GamePosition]] = dominoes_on
-        self.dominoes_off: t.Set[GameDomino] = dominoes_off
+        self.dominoes_on: t.Dict[GameDomino, t.List[t.Tuple[GamePosition, GamePosition]]] = dominoes_on
+        self.dominoes_off: t.List[GameDomino] = dominoes_off
         self.grid: t.List[t.List[GameBoardCell]] = grid
 
     def __add__(self, move: GameMove) -> 'GameBoard':
         # Minimize possible invalid moves by ensuring that a piece is always available when applying the respective move
         assert move.domino in self.dominoes_off, f'Domino is not available anymore: ({move.domino.head, move.domino.tail})!'
-        assert move.domino not in self.dominoes_on, f'Domino is already placed: ({move.domino.head, move.domino.tail})!'
+        assert len(self.dominoes_on.get(move.domino, [])) <= 2, f'Domino cannot be placed anymore: ({move.domino.head, move.domino.tail})!'
 
         # Copy the old grid in order to build a new one (immutable approach)
         new_game_board: GameBoard = copy.deepcopy(self)
 
         # Add the head of the domino to the first pos
-        assert (cell := new_game_board.grid[move.position[0].index[0]][move.position[0].index[1]]).is_empty(), f'Tried to place domino on empty cell: {cell}'
-        new_game_board.grid[move.position[0].index[0]][move.position[0].index[1]] = GameBoardCell(
+        assert (cell := new_game_board.grid[move.position[0][0]][move.position[0][1]]).is_empty(), f'Tried to place domino on empty cell: {cell}'
+        new_game_board[move.position[0][0]][move.position[0][1]] = GameBoardCell(
+            diamond=new_game_board[move.position[0][0]][move.position[0][1]].diamond(),
             index=move.position[0].index,
             domino=move.domino.head,
         )
 
         # Add the tail of the domino to the second pos
-        assert (cell := new_game_board.grid[move.position[1].index[0]][move.position[1].index[1]]).is_empty(), f'Tried to place domino on empty cell: {cell}'
-        new_game_board.grid[move.position[1].index[0]][move.position[1].index[1]] = GameBoardCell(
+        assert (cell := new_game_board.grid[move.position[1][0]][move.position[1][1]]).is_empty(), f'Tried to place domino on empty cell: {cell}'
+        new_game_board[move.position[1][0]][move.position[1][1]] = GameBoardCell(
+            diamond=new_game_board[move.position[1][0]][move.position[1][1]].diamond(),
             index=move.position[1].index,
             domino=move.domino.tail,
         )
 
         # Mark that the domino was placed on the board
-        new_game_board.dominoes_off.discard(move.domino)
-        new_game_board.dominoes_on[move.domino] = move.position
+        new_game_board.dominoes_off.remove(move.domino)
+        new_game_board.dominoes_on[move.domino] = new_game_board.dominoes_on.get(move.domino, []) + [move.position]
+        assert len(new_game_board.dominoes_on[move.domino]) <= 2, 'Too many dominoes of the same type were placed!'
 
         # Create a new grid with the new cells
         return new_game_board
 
-    def value(self) -> np.ndarray:
-        return np.array([[self.grid[i][j].value() for j in range(len(self.grid[i]))] for i in range(len(self.grid))], dtype=np.int32)
+    def __getitem__(self, index: int) -> t.List['GameBoardCell']:
+        return self.grid[index]
 
     def __str__(self) -> str:
         output: str = ''
@@ -455,6 +557,9 @@ class GameBoard(object):
             if i != len(self.grid) - 1:
                 output += '\n'
         return output
+
+    def value(self) -> np.ndarray:
+        return np.array([[self.grid[i][j].value() for j in range(len(self.grid[i]))] for i in range(len(self.grid))], dtype=np.int32)
 
     @staticmethod
     def empty() -> 'GameBoard':
@@ -486,7 +591,7 @@ class GameBoard(object):
             grid.append(row)
 
         # Create the list of possible dominoes
-        dominoes_off: t.Set[GameDomino] = {GameDomino(domino=domino) for domino in GameDomino.dominoes}
+        dominoes_off: t.List[GameDomino] = [GameDomino(domino=domino) for domino in GameDomino.dominoes] * 2
 
         # Fill the board with the empty cells
         return GameBoard(grid=grid, dominoes_on=dict(), dominoes_off=dominoes_off)
@@ -557,7 +662,10 @@ class GameBoardCell(object):
         return None if self.__domino is None else self.__domino
 
     def value(self) -> int:
-        return self.domino() or 7
+        if (domino := self.domino()) is None:
+            return 7
+        else:
+            return domino
 
     def __str__(self) -> str:
         pos: Tuple[str, str] = GameBoard.index_to_pos(self.index)
