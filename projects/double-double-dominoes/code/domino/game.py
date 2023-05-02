@@ -10,6 +10,7 @@ import copy
 import matplotlib.pyplot as plt
 from pandas.core.frame import DataFrame
 
+from .errors import NoDominoFoundError, CannotSolveGameError
 from .vision import Board2MatrixOpeation, DisplayOperation
 from .data import Dataset, GameDataset, DDDGameDataset, DDDRegularGameDataset, DDDBonusGameDataset
 from .model import CellClassifier, PretrainedCellClassifier, RandomForestCellClassifier
@@ -38,7 +39,9 @@ class Task(abc.ABC, t.Generic[TASK_DATASET]):
 class DoubleDoubleDominoesTask(Task[DDDGameDataset]):
     def __init__(self,
                  dataset_path: pb.Path,
-                 classifier_path: pb.Path,
+                 template_path: pb.Path,
+                 output_path: pb.Path,
+                 classifiers: t.List[CellClassifier],
                  *args,
                  template_index: t.Optional[int] = None,
                  template_selection_type: str = 'pts',
@@ -46,16 +49,15 @@ class DoubleDoubleDominoesTask(Task[DDDGameDataset]):
                  show_matrix: bool = False,
                  show_image: bool = False,
                  cell_splitter: str='hough',
-                 cell_classifier: str = 'resnet',
                  train: bool = False,
+                 debug: bool = False,
                  **kwargs) -> None:
-        super().__init__(*args, game_dataset=DDDGameDataset(dataset_path, train=train), **kwargs)
+        super().__init__(*args, game_dataset=DDDGameDataset(dataset_path, path_template=template_path, train=train, path_output=output_path), **kwargs)
 
         # Use a pretrained model to classify the cell contents
-        if cell_classifier == 'resnet':
-            self.cell_classifier: CellClassifier = PretrainedCellClassifier.load_checkpoint(classifier_path, num_workers=0)
-        elif cell_classifier == 'forest':
-            self.cell_classifier: CellClassifier = RandomForestCellClassifier.load_checkpoint(classifier_path)
+        self.debug: bool = debug
+        self.classifiers: t.List[CellClassifier] = classifiers
+        assert len(classifiers) >= 1, 'At least on cell classifier must be provided!'
 
         # Game templates: board + grid
         self.template_image_board: np.ndarray = self.dataset.dataset_help.template(dynamic_retrieval=template_dynamic_retrieval,
@@ -72,14 +74,20 @@ class DoubleDoubleDominoesTask(Task[DDDGameDataset]):
         # ComputerVision Useful Operations
         self.board2matrix = Board2MatrixOpeation(board_template=self.template_image_board,
                                                  grid_template=self.template_image_grid,
-                                                 cell_classifier=self.cell_classifier,
+                                                 cell_classifier=self.classifiers[0],
                                                  cell_splitter=cell_splitter,
                                                  show_matrix=show_matrix,
                                                  show_image=show_image)
 
         # Create tasks to be solved
-        self.task_regular: RegularTask = RegularTask(dataset=self.dataset.dataset_regular, board2matrix=self.board2matrix)
-        self.task_bonus: BonusTask = BonusTask(dataset=self.dataset.dataset_bonus, board2matrix=self.board2matrix)
+        self.task_regular: RegularTask = RegularTask(context=self,
+                                                     dataset=self.dataset.dataset_regular,
+                                                     board2matrix=self.board2matrix,
+                                                     debug=debug)
+        self.task_bonus: BonusTask = BonusTask(context=self,
+                                               dataset=self.dataset.dataset_bonus,
+                                               board2matrix=self.board2matrix,
+                                               debug=debug)
 
     def solve(self) -> None:
         # Solve the two tasks and optionally save the results in the their respective format
@@ -88,29 +96,46 @@ class DoubleDoubleDominoesTask(Task[DDDGameDataset]):
 
 
 class RegularTask(Task[DDDRegularGameDataset]):
-    def __init__(self, dataset: DDDRegularGameDataset, board2matrix: Board2MatrixOpeation, *args, **kwargs) -> None:
+    def __init__(self,
+                 context: DoubleDoubleDominoesTask,
+                 dataset: DDDRegularGameDataset,
+                 board2matrix: Board2MatrixOpeation, *args, debug: bool = False, **kwargs) -> None:
         super().__init__(*args, game_dataset=dataset, **kwargs)
         self.board2matrix: Board2MatrixOpeation = board2matrix
+        self.context: DoubleDoubleDominoesTask = context
+        self.debug: bool = debug
 
     def solve(self) -> None:
         for game_index in range(len(self.dataset)):
             # Read one game at a time
             game_images, game_moves = self.dataset[game_index]
 
-            # Build a single instance of the game to isolate states
-            game = Game(index=game_index + 1,
-                        images=game_images,
-                        moves=game_moves,
-                        board2matrix=self.board2matrix)
+            try:
+                # Build a single instance of the game to isolate states
+                game = Game(task=self,
+                            index=game_index + 1,
+                            images=game_images,
+                            moves=game_moves,
+                            board2matrix=self.board2matrix,
+                            debug=self.debug)
 
-            # Solve the game
-            game.solve(self.dataset.path_output)
+                # Solve the game
+                game.solve(self.dataset.path_output)
+            except CannotSolveGameError as e:
+                if self.debug:
+                    print('Skipping Game: {}'.format(game_index))
+                    print(e)
 
 
 class BonusTask(Task[DDDBonusGameDataset]):
-    def __init__(self, dataset: DDDBonusGameDataset, board2matrix: Board2MatrixOpeation, *args, **kwargs) -> None:
+    def __init__(self,
+                 context: DoubleDoubleDominoesTask,
+                 dataset: DDDBonusGameDataset,
+                 board2matrix: Board2MatrixOpeation, *args, debug: bool = False, **kwargs) -> None:
         super().__init__(*args, game_dataset=dataset, **kwargs)
         self.board2matrix: Board2MatrixOpeation = board2matrix
+        self.context: DoubleDoubleDominoesTask = context
+        self.debug: bool = debug
 
     def solve(self) -> None:
         pass
@@ -118,10 +143,11 @@ class BonusTask(Task[DDDBonusGameDataset]):
 
 class Game(object):
     def __init__(self,
+                 task: RegularTask,
                  index: int,
                  images: np.ndarray,
                  moves: pd.DataFrame,
-                 board2matrix: Board2MatrixOpeation, *args, **kwargs) -> None:
+                 board2matrix: Board2MatrixOpeation, *args, debug: bool = False, **kwargs) -> None:
         super().__init__()
 
         # Game specific content
@@ -130,37 +156,73 @@ class Game(object):
         self.game_states: t.List[GameState] = []
         self.game_moves: t.List[GameMove] = []
         self.images: np.ndarray = images
-        self.index: int = index
+        self.task: RegularTask = task
+        self.game_index: int = index
+        self.debug: bool = debug
 
     def solve(self, output: pb.Path) -> None:
         # Initialize the GameState from scratch as it's the first turn
-        self.game_states: t.List[GameState] = [GameState.empty()]
+        self.game_states: t.List[GameState] = [GameState.empty(debug=self.debug)]
 
-        # Iterate through each image and the respective player move
-        for image, (_, move) in zip(self.images, self.player_moves.iterrows()):
-            # Image -> Matrix with possible bad predictions
-            matrix: np.ndarray = self.b2m(image)
+        try:
+            # Iterate through each image and the respective player move
+            for move_index, (image, (_, move)) in enumerate(zip(self.images, self.player_moves.iterrows())):
+                # Allocate a number of retries for each move
+                is_done: bool = False
+                retry_count: int = 0
 
-            # Combine the new changes with the previous state
-            next_game_state: GameState = self.game_states[-1] + (matrix, move)
+                # Use the best classifier initially
+                self.b2m.cell_classifier = self.task.context.classifiers[0]
 
-            # Go to the next state and retrieve the next move
-            self.game_states.append(next_game_state)
+                # Try to solve the game multiple times
+                while not is_done:
+                    try:
+                        # Image -> Matrix with possible bad predictions
+                        matrix: np.ndarray = self.b2m(image)
+
+                        # Generate the next state of the game
+                        next_game_state: GameState = self.game_states[-1] + (matrix, move)
+                    except NoDominoFoundError as e:
+                        if self.debug:
+                            print(e)
+                        if retry_count == len(self.task.context.classifiers) - 1:
+                            raise CannotSolveGameError(self.game_index, move_index)
+                        else:
+                            self.b2m.cell_classifier = self.task.context.classifiers[retry_count := retry_count + 1]
+                        if self.debug:
+                            print(f'Retry {retry_count}...')
+                    except Exception as e:
+                        if self.debug:
+                            print('Unknown Error:\n{}', e)
+                            raise CannotSolveGameError(self.game_index, move_index)
+                    else:
+                        is_done = True
+
+                # Go to the next state and retrieve the next move
+                self.game_states.append(next_game_state)
+        except CannotSolveGameError as e:
+            if self.debug:
+                print('Saving results obtained until this point for the current game: {}'.format(self.game_index))
 
         # Extract the list of moves that have occurred
         self.game_moves = [state.game_move for state in self.game_states if state.game_move is not None]
 
         # Save the results according to the established format as .txt files
         for i, move in enumerate(self.game_moves):
-            with open(str(output / f'{self.index}_{i + 1:02}.txt'), 'w') as move_file:
+            # Create output directory if it does not exist
+            output.mkdir(parents=True, exist_ok=True)
+
+            # Write the solution
+            with open(str(output / f'{self.game_index}_{i + 1:02}.txt'), 'w') as move_file:
                 move_file.write(str(move))
                 move_file.flush()
 
 
-class GameState(object):
-    def __init__(self, index: int, game_board: 'GameBoard', score_track: 'GameScoreTrack', *args, game_move: t.Optional['GameMove'] = None, **kwargs) -> None:
+class GameState(object): # TODO: remove debug
+    def __init__(self, move_index: int, game_board: 'GameBoard', score_track: 'GameScoreTrack', *args, game_move: t.Optional['GameMove'] = None, debug: bool = False, **kwargs) -> None:
         super().__init__()
-        self.index: int = index
+        self.debug: bool = debug
+        self.move_index: int = move_index
         self.game_board: GameBoard = game_board
         self.score_track: GameScoreTrack = score_track
         self.game_move: t.Optional[GameMove] = game_move
@@ -172,12 +234,12 @@ class GameState(object):
         # Start robust filtering of invalid predictions
         domino, pos = self.matrix2move(matrix)
 
-        # Compute the score using the rules of the game
-        scores: Tuple[int, int] = self.move2scores(domino, pos)
-
         # Find out who the main and other player are
         main_player: str  = 'player' + str(player_move.loc['player'])
         other_player: str = str(GameState.other_player(main_player))
+
+        # Compute the score using the rules of the game
+        scores: Tuple[int, int] = self.move2scores(domino, pos, main_player, other_player)
 
         # Create the game move using the computed score and placement
         game_move: GameMove = GameMove(main_score=scores[0], main_player=main_player, other_score=scores[1], other_player=other_player, domino=domino, positions=pos)
@@ -185,25 +247,41 @@ class GameState(object):
         new_board: GameBoard = self.game_board + game_move
 
         # Create a new game state using immutability
-        return GameState(index=self.index + 1, game_board=new_board, score_track=new_score_track, game_move=game_move)
+        return GameState(move_index=self.move_index + 1, game_board=new_board, score_track=new_score_track, game_move=game_move, debug=self.debug)
 
     def matrix2move(self, matrix: np.ndarray) -> t.Tuple['GameDomino', t.Tuple['GamePosition', 'GamePosition']]:
+        # Only changes should be taken into account, overlaps should be removed along with isolated unit cells
         unit_matrix: np.ndarray = (matrix != self.game_board.value()).astype(np.int32)
+        unit_matrix_init: np.ndarray = unit_matrix.copy()
+
+        if self.debug:
+            print('Initial Unit Matrix:\n', unit_matrix)
+            print('Prediction:\n', matrix)
+            print('Previous Board Values:\n', self.game_board.value())
+
         unit_matrix = self.remove_invalid_cells(matrix, unit_matrix)
         unit_matrix = self.remove_isolated_cells(unit_matrix)
 
-        if self.index == 0:
+        # Initial prior that which states that pieces must be centered
+        if self.move_index == 0:
             unit_matrix: np.ndarray = self.remove_non_centered_cells(unit_matrix)
 
+        # Detect the possible domino pieces
         dominoes: t.List[t.Tuple[GameDomino, t.Tuple[GamePosition, GamePosition]]] = self.detect_dominoes(matrix, unit_matrix)
-        dominoes = self.remove_seen_dominoes(dominoes)
-        dominoes = self.remove_invalid_dominoes(dominoes)
 
-        print(unit_matrix)
-        print(matrix)
-        print(self.game_board.value())
-        print(str(dominoes[0][0]), str(dominoes[0][1][0]), ' ', str(dominoes[0][1][1]))
-        assert len(dominoes) == 1, f'A single domino may be predicted! Found: {len(dominoes)}'  # TODO: remove this
+        # Remove invalid dominoes by using prior information
+        if self.move_index != 0:
+            dominoes = self.remove_seen_dominoes(dominoes)
+            dominoes = self.remove_invalid_dominoes(dominoes)
+
+        if self.debug:
+            print('Filtered Unit Matrix:\n', unit_matrix)
+            print('Found Dominoes:\n', [str(piece[0]) + ' at ' + str(piece[1][0]) + ' ' + str(piece[1][1]) for piece in dominoes])
+
+        if len(dominoes) == 0:
+            raise NoDominoFoundError(unit_matrix_init, unit_matrix, matrix, self.game_board.value())
+
+        # assert len(dominoes) == 1, f'A single domino may be predicted! Found: {len(dominoes)}'  # TODO: remove this
         return dominoes[0]
 
     def detect_dominoes(self, matrix: np.ndarray, unit_matrix: np.ndarray) -> t.List[t.Tuple['GameDomino', t.Tuple['GamePosition', 'GamePosition']]]:
@@ -221,7 +299,7 @@ class GameState(object):
                 if i < unit_matrix.shape[0] - 1 and unit_matrix[i + 1][j] == 1:
                     pos.append((GamePosition(index=(i, j)), GamePosition(index=(i + 1, j))))
 
-        # Pass through each domino position and keep only the valid ones
+        # Build the domino
         for i, ((i1, j1), (i2, j2)) in enumerate(pos):
             if matrix[i1][j1] >= matrix[i2][j2]:
                 domino: GameDomino = GameDomino((matrix[i1][j1], matrix[i2][j2]))
@@ -232,16 +310,65 @@ class GameState(object):
                 head_pos: GamePosition = pos[i][1]
                 tail_pos: GamePosition = pos[i][0]
             dominoes.append((domino, (head_pos, tail_pos)))
+
         return dominoes
 
     def remove_invalid_dominoes(self, dominoes: t.List[t.Tuple['GameDomino', t.Tuple['GamePosition', 'GamePosition']]]) -> t.List[t.Tuple['GameDomino', t.Tuple['GamePosition', 'GamePosition']]]:
-        return dominoes
+        valid_dominoes: t.List[t.Tuple['GameDomino', t.Tuple['GamePosition', 'GamePosition']]] = []
+        for domino, placement in dominoes:
+            # Fetch head's and tail's adjacent cells
+            HA, TA = GameBoard.neighbors(placement)
+
+            # Separatte the neighbours from the adjacent cells
+            HN = [N for i, N in enumerate(HA) if i % 2 == 0]
+            TN = [N for i, N in enumerate(TA) if i % 2 == 0]
+
+            # A piece must be connected to another with the same number
+            is_connected: bool = False
+            head, tail = domino.head, domino.tail
+            for value, neighbors in [(head, HN), (tail, TN)]:
+                for neighbor in neighbors:
+                    if neighbor is None:
+                        continue
+                    if (piece := self.game_board[neighbor[0]][neighbor[1]].domino()) is None:
+                        continue
+                    if value == piece:
+                        is_connected = True
+                        break
+                if is_connected:
+                    break
+            if not is_connected:
+                continue
+
+            # Compute a boolean array indicating if an adjacent cell has a domino on it or not. Outside cells are None.
+            HNA = [None if p is None else self.game_board[p[0]][p[1]].domino() for p in HA]
+            TNA = [None if p is None else self.game_board[p[0]][p[1]].domino() for p in TA]
+
+            # A piece must not form a square on the corners
+            is_square: bool = False
+            for CA in [HNA, TNA]:
+                if all([x is not None for x in CA[:3]]):
+                    is_square = True
+                    break
+                if all([x is not None for x in CA[-3:]]):
+                    is_square = True
+                    break
+            if HNA[0] is not None and TNA[-1] is not None:
+                is_square = True
+            if HNA[-1] is not None and TNA[0] is not None:
+                is_square = True
+            if is_square:
+                continue
+
+            # Keep the domino because it might be good
+            valid_dominoes.append((domino, placement))
+        return valid_dominoes
 
     def remove_seen_dominoes(self, dominoes: t.List[t.Tuple['GameDomino', t.Tuple['GamePosition', 'GamePosition']]]) -> t.List[t.Tuple['GameDomino', t.Tuple['GamePosition', 'GamePosition']]]:
         return [(domino, pos) for domino, pos in dominoes if domino in self.game_board.dominoes_off]
 
     def remove_non_centered_cells(self, unit_matrix: np.ndarray) -> np.ndarray:
-        unit_matrix = unit_matrix.copy()
+        unit_matrix = unit_matrix.copy() # TODO: what if there are multiple choices?
         for i in range(unit_matrix.shape[0]):
             for j in range(unit_matrix.shape[1]):
                 if unit_matrix[i][j] != 1:
@@ -277,13 +404,30 @@ class GameState(object):
                 if matrix[i][j] == 7:
                     matrix[i][j] = 0
                     continue
-                if not self.game_board[i][j].is_empty(): # TODO: should also do majority voting?
+                if not self.game_board[i][j].is_empty():
                     matrix[i][j] = 0
                     continue
         return unit_matrix
 
-    def move2scores(self, domino: 'GameDomino', pos: t.Tuple['GamePosition', 'GamePosition']) -> t.Tuple[int, int]:
-        return 0, 0
+    def move2scores(self, domino: 'GameDomino', pos: t.Tuple['GamePosition', 'GamePosition'], main_player: str, other_player: str) -> t.Tuple[int, int]:
+        # Both players have zero for the current move at the beginning
+        main_score:  int = 0
+        other_score: int = 0
+
+        # Apply the first rule
+        if   (diamond := self.game_board[pos[0][0]][pos[0][1]].diamond()) is not None:
+            main_score += diamond * (2 if domino.is_double_domino() else 1)
+        elif (diamond := self.game_board[pos[1][0]][pos[1][1]].diamond()) is not None:
+            main_score += diamond * (2 if domino.is_double_domino() else 1)
+
+        # Apply the second rule
+        if self.score_track[main_player] in (domino.head, domino.tail):
+            main_score += 3
+        if self.score_track[other_player] in (domino.head, domino.tail):
+            other_score += 3
+
+        # Return both scores
+        return main_score, other_score
 
     @staticmethod
     def other_player(player: str) -> str:
@@ -295,11 +439,11 @@ class GameState(object):
             raise ValueError('Invalid player number: {}'.format(player))
 
     @staticmethod
-    def empty() -> 'GameState':
+    def empty(**kwargs) -> 'GameState':
         # Initialize the first game state (beginning of the game)
         game_board: GameBoard = GameBoard.empty()
         score_track: GameScoreTrack = GameScoreTrack.empty()
-        return GameState(index=0, game_board=game_board, score_track=score_track, game_move=None)
+        return GameState(move_index=0, game_board=game_board, score_track=score_track, game_move=None, **kwargs)
 
 
 class GameScoreTrack(object):
@@ -443,7 +587,15 @@ class GamePosition(object):
         return hash(self.index)
 
     def __str__(self) -> str:
-        return f'{self.index[0]}{self.index[1]}'
+        return f'{self.index[0]}:{self.index[1]}'
+
+    @staticmethod
+    def horizontal(pos1: 'GamePosition', pos2: 'GamePosition') -> bool:
+        return pos1[0] == pos2[0]
+
+    @staticmethod
+    def vertical(pos1: 'GamePosition', pos2: 'GamePosition') -> bool:
+        return pos1[1] == pos2[1]
 
 
 class GameMove(object):
@@ -492,6 +644,8 @@ class GameMove(object):
 
 
 class GameBoard(object):
+    MAX_ROWS: int = 15
+    MAX_COLS: int = 15
     diamond_to_points: t.Dict[str, int] = {
         'blue':   1,
         'yellow': 2,
@@ -560,6 +714,30 @@ class GameBoard(object):
 
     def value(self) -> np.ndarray:
         return np.array([[self.grid[i][j].value() for j in range(len(self.grid[i]))] for i in range(len(self.grid))], dtype=np.int32)
+
+    @staticmethod
+    def neighbors(pos: t.Tuple[GamePosition, GamePosition]) -> t.Tuple[t.List[GamePosition | None], t.List[GamePosition | None]]:
+        neighbors: t.Tuple[t.List[GamePosition | None], t.List[GamePosition | None]] = ([], [])
+
+        # Clockwise manner for each head
+        if GamePosition.horizontal(pos[0], pos[1]):
+            indices: t.List[t.Tuple[int, int]] = [(1, 0), (1, -1), (0, -1), (-1, -1), (-1, 0)]
+        elif GamePosition.vertical(pos[0], pos[1]):
+            indices: t.List[t.Tuple[int, int]] = [(0, -1), (-1, -1), (-1, 0), (-1, 1), (0, 1)]
+        else:
+            raise Exception('Invalid domino positions, cannot find neighbors: {} {}-{}'.format(pos[0], pos[1]))
+
+        # Compute the neighbour indices regardless if it's vertical or horizontal
+        pos = pos if (keep_order := pos[0] < pos[1]) else (pos[1], pos[0])
+        for i, j in indices:
+            for index, sign in [(0, 1), (1, -1)]:
+                row: int = pos[index][0] + i * sign
+                col: int = pos[index][1] + j * sign
+                if 0 <= row < GameBoard.MAX_ROWS and 0 <= col < GameBoard.MAX_COLS:
+                    neighbors[index].append(GamePosition(index=(row, col)))
+                else:
+                    neighbors[index].append(None)
+        return neighbors if keep_order else (neighbors[1], neighbors[0])
 
     @staticmethod
     def empty() -> 'GameBoard':

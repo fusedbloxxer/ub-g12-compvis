@@ -21,24 +21,20 @@ class Dataset(abc.ABC):
 
 
 class GameDataset(Dataset):
-    def __init__(self, path: pb.Path, task: str, train: bool = True) -> None:
+    def __init__(self, path_input: pb.Path, path_output: pb.Path, task: str, train: bool = True, **kwargs) -> None:
         super().__init__()
 
         # Argument validation
         self.task: str = task
         self.train: bool = train
-        assert self.task in ['bonus_task', 'regular_task'], f'Invalid task type, found {self.task}'
+        assert self.task in ['bonus_task', 'regular_tasks'], f'Invalid task type, found {self.task}'
 
         # Ensure all given directories exist
-        self.path: pb.Path = path
-        self.path_input: pb.Path
-        self.path_truth: t.Optional[pb.Path] = None
-        for suffix in ['_input'] + ([] if not self.train else ['_truth']):
-            assert folder_exists(self.path / suffix[1:] / self.task)
-            setattr(self, 'path' + suffix, self.path / suffix[1:] / self.task)
+        self.path_input: pb.Path = path_input / task
+        self.path_truth: t.Optional[pb.Path] = None if train is False else path_input / '..' / 'truth' / task
 
-        # Eagerly create the output dirs
-        self.path_output: pb.Path = self.path / 'output' / self.task
+        # Eagerly create the output dir
+        self.path_output: pb.Path = path_output / task
         self.path_output.mkdir(parents=True, exist_ok=True)
 
 
@@ -62,11 +58,11 @@ class DDDHelpDataset(Dataset):
             index = 1
 
         # Retrieve an image by index, downscale and extract its template
-        template_image: np.ndarray = self[index][0]
+        template_image: np.ndarray = self.__getitem__(index)[0][0]
         template_image = cv.resize(template_image, None, fx=scale, fy=scale, interpolation=cv.INTER_LINEAR)
 
         # Make sure there is always something to fallback onto
-        hardcoded_fallback_template: np.ndarray = self[1][0]
+        hardcoded_fallback_template: np.ndarray = self.__getitem__(1)[0][0]
         hardcoded_fallback_template = cv.resize(hardcoded_fallback_template, None, fx=scale, fy=scale, interpolation=cv.INTER_LINEAR)
 
         # Handle two types of templates: board & grid
@@ -168,14 +164,15 @@ class DDDHelpDataset(Dataset):
         transform = cv.getPerspectiveTransform(template_pts.astype(np.float32), desired_pts.astype(np.float32))
         return cv.warpPerspective(template_image, transform, (mx_line, mx_line))
 
-    def __getitem__(self, index: int | slice) -> np.ndarray:
+    def __getitem__(self, index: int | slice) -> t.Tuple[np.ndarray, pd.DataFrame]:
         if isinstance(index, int):
             index_image: slice = slice(index, index + 1)
         else:
             index_image: slice = index
 
         image_list: t.List[np.ndarray] = []
-        for image_path in sorted(self.path_help.glob(self.pattern_image), key=lambda x: x.name):
+        image_info_df: pd.DataFrame = pd.DataFrame(columns=['img_name', 'img_path'])
+        for i, image_path in enumerate(sorted(self.path_help.glob(self.pattern_image), key=lambda x: x.name)):
             match: re.Match[str] | None = re.search(self.regex_image, image_path.name)
 
             if not match:
@@ -189,17 +186,18 @@ class DDDHelpDataset(Dataset):
                 continue
 
             image: np.ndarray = cv.imread(str(image_path.absolute()), cv.IMREAD_GRAYSCALE)
+            image_info_df.loc[i] = [image_path.name, image_path]
             image = keep_aspect_ratio(image, np.array([3_072, 4_080]))
             image_list.append(image)
-        return np.stack(image_list, axis=0)
+        return np.stack(image_list, axis=0), image_info_df
 
     def __len__(self) -> int:
         return len(list(self.path_help.glob(self.pattern_image)))
 
 
 class DDDBonusGameDataset(GameDataset):
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, task='bonus_task', **kwargs)
+    def __init__(self, path_input: pb.Path, path_output: pb.Path, *args, **kwargs) -> None:
+        super().__init__(*args, path_input=path_input, path_output=path_output, task='bonus_task', **kwargs)
 
         self.pattern_image: str = '?*.jpg'
         self.pattern_truth: str = '?*.txt'
@@ -292,8 +290,8 @@ class DDDBonusGameDataset(GameDataset):
 
 
 class DDDRegularGameDataset(GameDataset):
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, task='regular_task', **kwargs)
+    def __init__(self, *args, path_input: pb.Path, path_output: pb.Path, **kwargs) -> None:
+        super().__init__(*args, path_input=path_input, path_output=path_output, task='regular_tasks', **kwargs)
 
         self.pattern_image: str = '?*_?*.jpg'
         self.pattern_truth: str = '?*_?*.txt'
@@ -412,16 +410,16 @@ class DDDRegularGameDataset(GameDataset):
 
 
 class DDDGameDataset(Dataset):
-    def __init__(self, path: pb.Path, *args, train: bool=True, **kwargs) -> None:
+    def __init__(self, path_input: pb.Path, path_template: pb.Path, path_output: pb.Path, *args, train: bool=True, **kwargs) -> None:
         super().__init__()
 
         # Internal parameters
         self.train: bool = train
 
         # Create helper datasets
-        self.dataset_help    = DDDHelpDataset(path=path / '..' / 'help')
-        self.dataset_bonus   = DDDBonusGameDataset(path=path, train=self.train)
-        self.dataset_regular = DDDRegularGameDataset(path=path, train=self.train)
+        self.dataset_help    = DDDHelpDataset(path=path_template)
+        self.dataset_bonus   = DDDBonusGameDataset(path_input=path_input, path_output=path_output, train=self.train)
+        self.dataset_regular = DDDRegularGameDataset(path_input=path_input, path_output=path_output, train=self.train)
 
 
 class DDDCellDataset(Dataset, data.Dataset):
@@ -462,32 +460,44 @@ class DDDCellDataset(Dataset, data.Dataset):
         return len(self.labels)
 
     @staticmethod
-    def create_cell_dataset(path: pb.Path, subset: DDDGameDataset, board2grid: Board2GridOperation, overwrite_imgs: bool=False, overwrite_csv: bool=False) -> None:
+    def create_cell_dataset(path: pb.Path, subset: DDDGameDataset, board2grid: Board2GridOperation, overwrite: bool=False, train: bool=True) -> None:
         # Consider a subset path
         cell_dataset_path: pb.Path = path
-        if cell_dataset_path.exists() and not overwrite_imgs:
-            print('Cell dataset already exists: {}'.format(path))
-            return
+        csv_path: pb.Path = cell_dataset_path / 'labels.csv'
 
         # Read all data
         cell_dataset: DDDGameDataset = subset
-        cell_dataset_path.mkdir(parents=True, exist_ok=False)
+        cell_dataset_path.mkdir(parents=True, exist_ok=True)
         regular_images, regular_labels = cell_dataset.dataset_regular[:, :]
         bonus_images, bonus_labels = cell_dataset.dataset_bonus[:]
 
         # Conatenate all images & labels
-        cell_images: np.ndarray   = np.concatenate([regular_images, bonus_images], axis=0)
-        cell_labels: pd.DataFrame = pd.concat([regular_labels, bonus_labels], join='inner', ignore_index=True)
-        cell_labels_df = pd.DataFrame(columns=['original_img_path', 'cell_image_path', 'label'])
+        if not train:
+            cell_images: np.ndarray   = np.concatenate([regular_images, bonus_images], axis=0)
+            cell_labels: pd.DataFrame = pd.concat([regular_labels, bonus_labels], join='inner', ignore_index=True)
+        else:
+            help_images, help_labels = cell_dataset.dataset_help[:]
+            cell_images: np.ndarray   = np.concatenate([regular_images, bonus_images, help_images], axis=0)
+            cell_labels: pd.DataFrame = pd.concat([regular_labels, bonus_labels, help_labels], join='inner', ignore_index=True)
+
+        # Read existing CSV or create a new one
+        if not overwrite:
+            cell_labels_df: pd.DataFrame = pd.read_csv(csv_path, index_col=0)
+        else:
+            cell_labels_df = pd.DataFrame(columns=['original_img_path', 'cell_image_path', 'label'])
 
         for i, (image, (_, labels)) in enumerate(zip(cell_images, cell_labels.iterrows())):
-            # Break the image into a matrix of cells
-            grid, grid_patch, grid_cells = board2grid(image)
-
+            # Establish the paths for the current grid
             original_image_path: pb.Path = pb.Path(labels['img_path'])
             cell_image_dir_path: pb.Path = cell_dataset_path / f'grid_{i + 1}'
             cell_image_dir_path.mkdir(parents=True, exist_ok=True)
 
+            # Skip generating images which are already in the dataframe
+            if str(original_image_path) in cell_labels_df['original_img_path'].values:
+                continue
+
+            # Break the image into a matrix of cells
+            grid, grid_patch, grid_cells = board2grid(image)
             cv.imwrite(str((cell_image_dir_path / 'grid.jpg').absolute()), grid)
             cv.imwrite(str((cell_image_dir_path / 'original.jpg').absolute()), image)
             cv.imwrite(str((cell_image_dir_path / 'grid_patch.jpg').absolute()), grid_patch)
@@ -500,10 +510,8 @@ class DDDCellDataset(Dataset, data.Dataset):
                     cv.imwrite(str(cell_image_path.absolute()), grid_cells[j][k])
                     cell_labels_df.loc[len(cell_labels_df)] = [str(original_image_path), str(cell_image_path), None]
 
-        # Create or overwrite labels file
-        csv_path: pb.Path = cell_dataset_path / 'labels.csv'
-        if not csv_path.exists() or overwrite_csv:
-            cell_labels_df.to_csv(csv_path, sep=',', header=True)
+        # Always save the csv, even if it's the same
+        cell_labels_df.to_csv(csv_path, sep=',', header=True)
 
 
 class DDDCellDatasetTorch(Dataset, data.Dataset):

@@ -2,6 +2,7 @@ import os
 from typing import Any, Optional
 from lightning.pytorch.utilities.types import STEP_OUTPUT
 import typing as t
+from sklearn.svm import SVC
 import torch
 from torch import nn
 import torch.nn.functional as F
@@ -137,9 +138,15 @@ class CellClassifier(abc.ABC):
         raise NotImplementedError()
 
     @staticmethod
-    @abc.abstractmethod
-    def load_checkpoint(path: pb.Path, *args, **kwargs) -> 'CellClassifier':
-        raise NotImplementedError()
+    def load_checkpoint(path: pb.Path, model_type: str, *args, **kwargs) -> 'CellClassifier':
+        if model_type == 'resnet':
+            return PretrainedCellClassifier.load_checkpoint(path)
+        elif model_type == 'forest':
+            return RandomForestCellClassifier.load_checkpoint(path)
+        elif model_type == 'svm':
+            return SVMCellClassifier.load_checkpoint(path)
+        else:
+            raise Exception('Invalid model type: {}'.format(model_type))
 
 
 class RandomForestCellClassifier(CellClassifier):
@@ -168,10 +175,36 @@ class RandomForestCellClassifier(CellClassifier):
         return RandomForestCellClassifier(model=joblib.load(path))
 
 
+class SVMCellClassifier(CellClassifier):
+    def __init__(self, model: SVC, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.model: SVC = model
+        self.train_mean: float = 100.0261724005487
+        self.train_std: float = 42.46173079733813
+
+    def __call__(self, grid_cells: t.List[t.List[np.ndarray]]) -> np.ndarray:
+        # Ensure all sizes match
+        cells_grayscale: np.ndarray = same_cell_dim(grid_cells)
+
+        # Flatten the image pixels
+        cells_features: np.ndarray = cells_grayscale.reshape(cells_grayscale.shape[0], -1)
+
+        # Normalize the data
+        cells_norm: np.ndarray = (cells_features - self.train_mean) / self.train_std
+
+        # Predict what the cells represent
+        outputs: np.ndarray = self.model.predict(X=cells_norm)
+        return outputs.reshape((len(grid_cells), len(grid_cells[0])))
+
+    @staticmethod
+    def load_checkpoint(path: pb.Path) -> 'SVMCellClassifier':
+        return SVMCellClassifier(model=joblib.load(path))
+
+
 class PretrainedCellClassifier(CellClassifier):
     def __init__(self, model: ResNetCellClassifier, num_workers: int = 0, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self.trainer = pl.Trainer(default_root_dir=pb.Path('..', '.model'))
+        self.trainer = pl.Trainer(default_root_dir=pb.Path('.model'))
         self.preprocess: nn.Module = DataPreprocess()
         self.model: ResNetCellClassifier = model
         self.num_workers: int = num_workers

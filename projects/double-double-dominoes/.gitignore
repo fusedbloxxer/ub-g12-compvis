@@ -1,3 +1,3 @@
 data/**/*.jpg
-.model/lightning_logs
-.cache/
+code/.model/lightning_logs
+code/.cache/
