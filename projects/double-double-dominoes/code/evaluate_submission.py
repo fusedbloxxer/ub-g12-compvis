@@ -97,10 +97,10 @@ def compare_annotations_bonus_task(filename_predicted,filename_gt,verbose=0):
 	return points_bonus
 
 #change this on your machine pointing to your results (txt files)
-predictions_path_root = "/home/invokariman/Projects/git/ub-g12-compvis/projects/double-double-dominoes/data/train/output/"
+predictions_path_root = "/home/invokariman/Projects/git/ub-g12-compvis/projects/double-double-dominoes/data/valid/output/"
 
 #change this on your machine to point to the ground-truth test
-gt_path_root = "/home/invokariman/Projects/git/ub-g12-compvis/projects/double-double-dominoes/data/train/truth/"
+gt_path_root = "/home/invokariman/Projects/git/ub-g12-compvis/projects/double-double-dominoes/data/valid/truth/"
 
 
 

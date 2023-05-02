@@ -37,9 +37,9 @@ SKLRN_DIR: pb.Path = MODEL_DIR / 'sklearn'
 TORCH_DIR: pb.Path = MODEL_DIR / 'torch'
 
 # Pretrained model weights
-FOREST_MODEL_PATH: pb.Path = SKLRN_DIR / 'balanced-random-forest.joblib'
-RESNET_MODEL_PATH: pb.Path = TORCH_DIR / 'resnet50-finetune-wip.ckpt'
-SVM_MODEL_PATH: pb.Path    = SKLRN_DIR / 'svm.joblib'
+FOREST_MODEL_PATH: pb.Path = SKLRN_DIR / 'balanced-random-forest-full.joblib'
+RESNET_MODEL_PATH: pb.Path = TORCH_DIR / 'resnet50-finetune-full.ckpt'
+SVM_MODEL_PATH: pb.Path    = SKLRN_DIR / 'svm-full.joblib'
 
 # Obtain deterministic results
 SEED = 42

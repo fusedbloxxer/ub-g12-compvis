@@ -218,7 +218,7 @@ class Game(object):
                 move_file.flush()
 
 
-class GameState(object): # TODO: remove debug
+class GameState(object):
     def __init__(self, move_index: int, game_board: 'GameBoard', score_track: 'GameScoreTrack', *args, game_move: t.Optional['GameMove'] = None, debug: bool = False, **kwargs) -> None:
         super().__init__()
         self.debug: bool = debug
@@ -368,7 +368,7 @@ class GameState(object): # TODO: remove debug
         return [(domino, pos) for domino, pos in dominoes if domino in self.game_board.dominoes_off]
 
     def remove_non_centered_cells(self, unit_matrix: np.ndarray) -> np.ndarray:
-        unit_matrix = unit_matrix.copy() # TODO: what if there are multiple choices?
+        unit_matrix = unit_matrix.copy()
         for i in range(unit_matrix.shape[0]):
             for j in range(unit_matrix.shape[1]):
                 if unit_matrix[i][j] != 1:
