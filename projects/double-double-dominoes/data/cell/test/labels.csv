@@ -1,4 +1,4 @@
-﻿,original_img_path,cell_image_path,label
+,original_img_path,cell_image_path,label
 0,../data/valid/input/regular_tasks/1_01.jpg,../data/cell/test/grid_1/cell_1A.jpg,7
 1,../data/valid/input/regular_tasks/1_01.jpg,../data/cell/test/grid_1/cell_1B.jpg,7
 2,../data/valid/input/regular_tasks/1_01.jpg,../data/cell/test/grid_1/cell_1C.jpg,7
