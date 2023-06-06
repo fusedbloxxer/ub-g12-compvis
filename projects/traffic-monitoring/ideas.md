@@ -14,6 +14,10 @@ https://www.mdpi.com/1424-8220/21/19/6358
 
 [Traffic Hard Benchmark](https://detrac-db.rit.albany.edu/)
 
+Train YOLO on intersection and UA-detrac datasets? (may take some time)
+
+Upscale images using simple operations / GANs?
+
 # Task 1
 
 # Task 2
