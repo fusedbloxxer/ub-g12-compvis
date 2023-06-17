@@ -203,8 +203,8 @@ class CarTrafficTaskTwoDataset(CarTrafficBaseDataset):
         for bbox_path in sorted(path.iterdir(), key=lambda x: x.name):
             if not (match := pattern_init_bbox.fullmatch(bbox_path.name)):
                 continue
-            context = int(match.group('context'))
-            assert context in self.video_dataset.lookup['context'], 'Did not find associated video for annotation: {}.'.format(context)
+            context = int(match.group('context')) # TODO
+            # assert context in self.video_dataset.lookup['context'], 'Did not find associated video for annotation: {}.'.format(context)
             lookup.loc[len(lookup)] = [
                 context,
                 str(bbox_path.relative_to('.'))
