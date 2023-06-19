@@ -1,2 +1,4 @@
+assets/**/*.xcf
+private/
 data/
 *.pt

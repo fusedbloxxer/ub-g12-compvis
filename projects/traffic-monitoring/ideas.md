@@ -23,3 +23,6 @@ Upscale images using simple operations / GANs?
 # Task 2
 
 # Task 3
+
+# DEPS
+pip 21.1.1
