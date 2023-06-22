@@ -1,6 +1,13 @@
 import typing as t
 import torch
+import torch.nn as nn
 import numpy as np
+from transformers.configuration_utils import PretrainedConfig
+from transformers.modeling_outputs import ImageClassifierOutput
+from transformers import VideoMAEPreTrainedModel, VideoMAEModel
+from transformers.modeling_utils import replace_return_docstrings
+from transformers.models.videomae.modeling_videomae import _CONFIG_FOR_DOC, VIDEOMAE_INPUTS_DOCSTRING
+from transformers.utils import add_start_docstrings_to_model_forward
 from ultralytics import YOLO
 from torchvision.transforms.functional import to_pil_image 
 from torchvision.models.detection import fasterrcnn_resnet50_fpn_v2, FasterRCNN_ResNet50_FPN_V2_Weights
@@ -45,28 +52,3 @@ class FasterRCNNMOD():
                 torch.stack(clss)[..., None]
             ], dim=1).cpu()
         return torch.empty((0, 5))
-
-
-class YOLOMOD():
-    def __init__(self, assets: t.Optional[Assets] = None) -> None:
-        super().__init__()
-        self.classes: t.List[str] = ['truck', 'bus', 'motorcycle', 'car']
-        self.assets: Assets | None = assets
-
-        if assets is None:
-            self.model = YOLO('yolov8n.pt', task='detect')
-        elif assets is not None:
-            self.model = YOLO(model=self.assets.weights_path / 'yolo_uadetrac.pt', task='detect')
-
-    def __call__(self, image: np.ndarray) -> np.ndarray:
-        result = self.model([image])[0]
-        bboxes: torch.Tensor = result.boxes.xyxy
-        labels = [result.names[c] for c in result.boxes.cls.tolist()]
-
-        index: t.List[int] = []
-        for i, label in enumerate(labels):
-            if label not in self.classes:
-                continue
-            index.append(i)
-
-        return bboxes[index].cpu().numpy()

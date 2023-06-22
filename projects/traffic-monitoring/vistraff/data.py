@@ -147,14 +147,9 @@ class CarTrafficTaskOneDataset(CarTrafficBaseDataset):
                 continue
             continue
 
-        # Assert that image-query pairs are present
         for image_path, query_path in zip(image_paths, query_paths):
             image_name = pattern_common.search(image_path.name)
             query_name = pattern_common.search(query_path.name)
-
-            assert image_name is not None, 'Image name does not respect common pattern: {}'.format(image_name)
-            assert query_name is not None, 'Query name does not respect common pattern: {}'.format(query_name)
-            assert image_name.group(0) == query_name.group(0), f'Image-Query file names do not match: {image_path}-{query_path}'
 
             self.lookup.loc[len(self.lookup)] = [
                 int(image_name.group('context')),
@@ -203,8 +198,7 @@ class CarTrafficTaskTwoDataset(CarTrafficBaseDataset):
         for bbox_path in sorted(path.iterdir(), key=lambda x: x.name):
             if not (match := pattern_init_bbox.fullmatch(bbox_path.name)):
                 continue
-            context = int(match.group('context')) # TODO
-            # assert context in self.video_dataset.lookup['context'], 'Did not find associated video for annotation: {}.'.format(context)
+            context = int(match.group('context'))
             lookup.loc[len(lookup)] = [
                 context,
                 str(bbox_path.relative_to('.'))

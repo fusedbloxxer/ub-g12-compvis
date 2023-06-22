@@ -1,0 +1,211 @@
+1. The libraries required to run this project are the following (note that to speed up the execution you should make sure to install PyTorch with cuda support):
+
+--extra-index-url https://download.pytorch.org/whl/cu118
+
+accelerate==0.20.3 ; python_version >= "3.10" and python_version < "3.12"
+aiohttp==3.8.4 ; python_version >= "3.10" and python_version < "3.12"
+aiosignal==1.3.1 ; python_version >= "3.10" and python_version < "3.12"
+anyio==3.7.0 ; python_version >= "3.10" and python_version < "3.12"
+appnope==0.1.3 ; python_version >= "3.10" and python_version < "3.12" and (platform_system == "Darwin" or sys_platform == "darwin")
+argon2-cffi-bindings==21.2.0 ; python_version >= "3.10" and python_version < "3.12"
+argon2-cffi==21.3.0 ; python_version >= "3.10" and python_version < "3.12"
+arrow==1.2.3 ; python_version >= "3.10" and python_version < "3.12"
+asttokens==2.2.1 ; python_version >= "3.10" and python_version < "3.12"
+async-timeout==4.0.2 ; python_version >= "3.10" and python_version < "3.12"
+attrs==23.1.0 ; python_version >= "3.10" and python_version < "3.12"
+autopep8==2.0.2 ; python_version >= "3.10" and python_version < "3.12"
+av==8.1.0 ; python_version >= "3.10" and python_version < "3.12"
+backcall==0.2.0 ; python_version >= "3.10" and python_version < "3.12"
+beautifulsoup4==4.12.2 ; python_version >= "3.10" and python_version < "3.12"
+bleach==6.0.0 ; python_version >= "3.10" and python_version < "3.12"
+cachetools==5.3.1 ; python_version >= "3.10" and python_version < "3.12"
+certifi==2023.5.7 ; python_version >= "3.10" and python_version < "3.12"
+cffi==1.15.1 ; python_version >= "3.10" and python_version < "3.12"
+charset-normalizer==3.1.0 ; python_version >= "3.10" and python_version < "3.12"
+cmake==3.26.4 ; platform_system == "Linux" and platform_machine == "x86_64" and python_version >= "3.10" and python_version < "3.12"
+colorama==0.4.6 ; python_version >= "3.10" and python_version < "3.12" and (platform_system == "Windows" or sys_platform == "win32")
+comm==0.1.3 ; python_version >= "3.10" and python_version < "3.12"
+contourpy==1.1.0 ; python_version >= "3.10" and python_version < "3.12"
+cycler==0.11.0 ; python_version >= "3.10" and python_version < "3.12"
+datasets==2.13.0 ; python_version >= "3.10" and python_version < "3.12"
+debugpy==1.6.7 ; python_version >= "3.10" and python_version < "3.12"
+decorator==5.1.1 ; python_version >= "3.10" and python_version < "3.12"
+defusedxml==0.7.1 ; python_version >= "3.10" and python_version < "3.12"
+dill==0.3.6 ; python_version >= "3.10" and python_version < "3.12"
+evaluate==0.4.0 ; python_version >= "3.10" and python_version < "3.12"
+exceptiongroup==1.1.1 ; python_version >= "3.10" and python_version < "3.11"
+executing==1.2.0 ; python_version >= "3.10" and python_version < "3.12"
+fastjsonschema==2.17.1 ; python_version >= "3.10" and python_version < "3.12"
+filelock==3.12.2 ; python_version >= "3.10" and python_version < "3.12"
+filterpy==1.4.5 ; python_version >= "3.10" and python_version < "3.12"
+fonttools==4.40.0 ; python_version >= "3.10" and python_version < "3.12"
+fqdn==1.5.1 ; python_version >= "3.10" and python_version < "3.12"
+frozenlist==1.3.3 ; python_version >= "3.10" and python_version < "3.12"
+fsspec==2023.6.0 ; python_version >= "3.10" and python_version < "3.12"
+fsspec[http]==2023.6.0 ; python_version >= "3.10" and python_version < "3.12"
+fvcore==0.1.5.post20221221 ; python_version >= "3.10" and python_version < "3.12"
+huggingface-hub==0.15.1 ; python_version >= "3.10" and python_version < "3.12"
+idna==2.10 ; python_version >= "3.10" and python_version < "3.12"
+iniconfig==2.0.0 ; python_version >= "3.10" and python_version < "3.12"
+iopath==0.1.10 ; python_version >= "3.10" and python_version < "3.12"
+iprogress==0.4 ; python_version >= "3.10" and python_version < "3.12"
+ipykernel==6.23.1 ; python_version >= "3.10" and python_version < "3.12"
+ipython-genutils==0.2.0 ; python_version >= "3.10" and python_version < "3.12"
+ipython==8.14.0 ; python_version >= "3.10" and python_version < "3.12"
+ipywidgets==8.0.6 ; python_version >= "3.10" and python_version < "3.12"
+isoduration==20.11.0 ; python_version >= "3.10" and python_version < "3.12"
+jedi==0.18.2 ; python_version >= "3.10" and python_version < "3.12"
+jinja2==3.1.2 ; python_version >= "3.10" and python_version < "3.12"
+joblib==1.2.0 ; python_version >= "3.10" and python_version < "3.12"
+jsonpointer==2.3 ; python_version >= "3.10" and python_version < "3.12"
+jsonschema==4.17.3 ; python_version >= "3.10" and python_version < "3.12"
+jsonschema[format-nongpl]==4.17.3 ; python_version >= "3.10" and python_version < "3.12"
+jupyter-client==8.2.0 ; python_version >= "3.10" and python_version < "3.12"
+jupyter-console==6.6.3 ; python_version >= "3.10" and python_version < "3.12"
+jupyter-core==5.3.0 ; python_version >= "3.10" and python_version < "3.12"
+jupyter-events==0.6.3 ; python_version >= "3.10" and python_version < "3.12"
+jupyter-server-terminals==0.4.4 ; python_version >= "3.10" and python_version < "3.12"
+jupyter-server==2.6.0 ; python_version >= "3.10" and python_version < "3.12"
+jupyter==1.0.0 ; python_version >= "3.10" and python_version < "3.12"
+jupyterlab-pygments==0.2.2 ; python_version >= "3.10" and python_version < "3.12"
+jupyterlab-widgets==3.0.7 ; python_version >= "3.10" and python_version < "3.12"
+kiwisolver==1.4.4 ; python_version >= "3.10" and python_version < "3.12"
+lap==0.4.0 ; python_version >= "3.10" and python_version < "3.12"
+lit==16.0.6 ; platform_system == "Linux" and platform_machine == "x86_64" and python_version >= "3.10" and python_version < "3.12"
+littleutils==0.2.2 ; python_version >= "3.10" and python_version < "3.12"
+lxml==4.9.2 ; python_version >= "3.10" and python_version < "3.12"
+markupsafe==2.1.3 ; python_version >= "3.10" and python_version < "3.12"
+matplotlib-inline==0.1.6 ; python_version >= "3.10" and python_version < "3.12"
+matplotlib==3.7.1 ; python_version >= "3.10" and python_version < "3.12"
+mistune==2.0.5 ; python_version >= "3.10" and python_version < "3.12"
+mpmath==1.3.0 ; python_version >= "3.10" and python_version < "3.12"
+multidict==6.0.4 ; python_version >= "3.10" and python_version < "3.12"
+multiprocess==0.70.14 ; python_version >= "3.10" and python_version < "3.12"
+nbclassic==1.0.0 ; python_version >= "3.10" and python_version < "3.12"
+nbclient==0.8.0 ; python_version >= "3.10" and python_version < "3.12"
+nbconvert==7.4.0 ; python_version >= "3.10" and python_version < "3.12"
+nbformat==5.9.0 ; python_version >= "3.10" and python_version < "3.12"
+nest-asyncio==1.5.6 ; python_version >= "3.10" and python_version < "3.12"
+networkx==3.1 ; python_version >= "3.10" and python_version < "3.12"
+notebook-shim==0.2.3 ; python_version >= "3.10" and python_version < "3.12"
+notebook==6.5.4 ; python_version >= "3.10" and python_version < "3.12"
+numpy==1.24.3 ; python_version >= "3.10" and python_version < "3.12"
+nvidia-ml-py==11.525.112 ; python_version >= "3.10" and python_version < "3.12"
+nvidia-smi==0.1.3 ; python_version >= "3.10" and python_version < "3.12"
+nvitop==1.1.2 ; python_version >= "3.10" and python_version < "3.12"
+ocsort==0.0.2 ; python_version >= "3.10" and python_version < "3.12"
+opencv-contrib-python==4.7.0.72 ; python_version >= "3.10" and python_version < "3.12"
+opencv-python==4.7.0.72 ; python_version >= "3.10" and python_version < "3.12"
+overrides==7.3.1 ; python_version >= "3.10" and python_version < "3.12"
+packaging==23.1 ; python_version >= "3.10" and python_version < "3.12"
+pandas==2.0.2 ; python_version >= "3.10" and python_version < "3.12"
+pandocfilters==1.5.0 ; python_version >= "3.10" and python_version < "3.12"
+parameterized==0.9.0 ; python_version >= "3.10" and python_version < "3.12"
+parso==0.8.3 ; python_version >= "3.10" and python_version < "3.12"
+pexpect==4.8.0 ; python_version >= "3.10" and python_version < "3.12" and sys_platform != "win32"
+pickleshare==0.7.5 ; python_version >= "3.10" and python_version < "3.12"
+pillow==9.5.0 ; python_version >= "3.10" and python_version < "3.12"
+platformdirs==3.5.1 ; python_version >= "3.10" and python_version < "3.12"
+pluggy==1.0.0 ; python_version >= "3.10" and python_version < "3.12"
+portalocker==2.7.0 ; python_version >= "3.10" and python_version < "3.12"
+prometheus-client==0.17.0 ; python_version >= "3.10" and python_version < "3.12"
+prompt-toolkit==3.0.38 ; python_version >= "3.10" and python_version < "3.12"
+psutil==5.9.5 ; python_version >= "3.10" and python_version < "3.12"
+ptyprocess==0.7.0 ; python_version >= "3.10" and python_version < "3.12" and (sys_platform != "win32" or os_name != "nt")
+pure-eval==0.2.2 ; python_version >= "3.10" and python_version < "3.12"
+pyarrow==12.0.1 ; python_version >= "3.10" and python_version < "3.12"
+pycodestyle==2.10.0 ; python_version >= "3.10" and python_version < "3.12"
+pycparser==2.21 ; python_version >= "3.10" and python_version < "3.12"
+pygments==2.15.1 ; python_version >= "3.10" and python_version < "3.12"
+pyparsing==3.0.9 ; python_version >= "3.10" and python_version < "3.12"
+pyrsistent==0.19.3 ; python_version >= "3.10" and python_version < "3.12"
+pytest==7.3.2 ; python_version >= "3.10" and python_version < "3.12"
+python-dateutil==2.8.2 ; python_version >= "3.10" and python_version < "3.12"
+python-json-logger==2.0.7 ; python_version >= "3.10" and python_version < "3.12"
+pytorchvideo==0.1.5 ; python_version >= "3.10" and python_version < "3.12"
+pytz==2023.3 ; python_version >= "3.10" and python_version < "3.12"
+pywin32==306 ; python_version >= "3.10" and python_version < "3.12" and (sys_platform == "win32" or platform_system == "Windows") and (platform_python_implementation != "PyPy" or platform_system == "Windows")
+pywinpty==2.0.10 ; python_version >= "3.10" and python_version < "3.12" and os_name == "nt"
+pyyaml==6.0 ; python_version >= "3.10" and python_version < "3.12"
+pyzmq==25.1.0 ; python_version >= "3.10" and python_version < "3.12"
+qtconsole==5.4.3 ; python_version >= "3.10" and python_version < "3.12"
+qtpy==2.3.1 ; python_version >= "3.10" and python_version < "3.12"
+regex==2023.6.3 ; python_version >= "3.10" and python_version < "3.12"
+requests==2.31.0 ; python_version >= "3.10" and python_version < "3.12"
+responses==0.18.0 ; python_version >= "3.10" and python_version < "3.12"
+rfc3339-validator==0.1.4 ; python_version >= "3.10" and python_version < "3.12"
+rfc3986-validator==0.1.1 ; python_version >= "3.10" and python_version < "3.12"
+safetensors==0.3.1 ; python_version >= "3.10" and python_version < "3.12"
+scikit-learn==1.2.2 ; python_version >= "3.10" and python_version < "3.12"
+scipy==1.9.3 ; python_version >= "3.10" and python_version < "3.12"
+seaborn==0.12.2 ; python_version >= "3.10" and python_version < "3.12"
+send2trash==1.8.2 ; python_version >= "3.10" and python_version < "3.12"
+setuptools==67.8.0 ; python_version >= "3.10" and python_version < "3.12"
+six==1.16.0 ; python_version >= "3.10" and python_version < "3.12"
+sniffio==1.3.0 ; python_version >= "3.10" and python_version < "3.12"
+sorcery==0.2.2 ; python_version >= "3.10" and python_version < "3.12"
+soupsieve==2.4.1 ; python_version >= "3.10" and python_version < "3.12"
+stack-data==0.6.2 ; python_version >= "3.10" and python_version < "3.12"
+sympy==1.12 ; python_version >= "3.10" and python_version < "3.12"
+tabulate==0.9.0 ; python_version >= "3.10" and python_version < "3.12"
+termcolor==2.3.0 ; python_version >= "3.10" and python_version < "3.12"
+terminado==0.17.1 ; python_version >= "3.10" and python_version < "3.12"
+threadpoolctl==3.1.0 ; python_version >= "3.10" and python_version < "3.12"
+tinycss2==1.2.1 ; python_version >= "3.10" and python_version < "3.12"
+tokenizers==0.13.3 ; python_version >= "3.10" and python_version < "3.12"
+tomli==2.0.1 ; python_version >= "3.10" and python_version < "3.11"
+torch==2.0.1+cu118 ; python_version >= "3.10" and python_version < "3.12"
+torchvision==0.15.2+cu118 ; python_version >= "3.10" and python_version < "3.12"
+tornado==6.3.2 ; python_version >= "3.10" and python_version < "3.12"
+tqdm==4.65.0 ; python_version >= "3.10" and python_version < "3.12"
+traitlets==5.9.0 ; python_version >= "3.10" and python_version < "3.12"
+transformers==4.30.2 ; python_version >= "3.10" and python_version < "3.12"
+triton==2.0.0 ; platform_system == "Linux" and platform_machine == "x86_64" and python_version >= "3.10" and python_version < "3.12"
+typing-extensions==4.6.3 ; python_version >= "3.10" and python_version < "3.12"
+tzdata==2023.3 ; python_version >= "3.10" and python_version < "3.12"
+ultralytics==8.0.118 ; python_version >= "3.10" and python_version < "3.12"
+uri-template==1.2.0 ; python_version >= "3.10" and python_version < "3.12"
+urllib3==2.0.3 ; python_version >= "3.10" and python_version < "3.12"
+wcwidth==0.2.6 ; python_version >= "3.10" and python_version < "3.12"
+webcolors==1.13 ; python_version >= "3.10" and python_version < "3.12"
+webencodings==0.5.1 ; python_version >= "3.10" and python_version < "3.12"
+websocket-client==1.5.2 ; python_version >= "3.10" and python_version < "3.12"
+widgetsnbextension==4.0.7 ; python_version >= "3.10" and python_version < "3.12"
+windows-curses==2.3.1 ; python_version >= "3.10" and python_version < "3.12" and platform_system == "Windows"
+wrapt==1.15.0 ; python_version >= "3.10" and python_version < "3.12"
+xxhash==3.2.0 ; python_version >= "3.10" and python_version < "3.12"
+yacs==0.1.8 ; python_version >= "3.10" and python_version < "3.12"
+yarl==1.9.2 ; python_version >= "3.10" and python_version < "3.12"
+
+
+2. Ensure that the required folders are present and contain data:
+   * data/
+     * test/
+       * context_videos_all_tasks/
+       * Task1/
+       * Task2/
+       * Task3/
+   * assets/
+     * backgrounds/
+     * masks/
+     * weights/
+       * yolo/
+   * vistraff/
+     * alg.py
+     * res.py
+     * data.py
+     * model.py
+     * main.ipynb
+   * pyproject.toml (for easy installation)
+
+3. (**Recommended**) Dependency Installation:
+   1. I recommend that you install poetry [here](https://python-poetry.org/docs/#installation).
+   2. Ensure you are in the project folder and open a **shell**.
+   3. Then do a ```poetry shell``` - to create a new environment.
+   4. Then do a ```poetry install``` - to install all dependencies in the environment.
+
+4. After installing the dependencies run the code.
+   Run the Jupyter Notebook (`main.ipynb`):
+    1. Place data under data/test/ as shown above
+    2. Change PATH_DATA if necessary
+    3. Run Task1 Cell and Task2 Cell

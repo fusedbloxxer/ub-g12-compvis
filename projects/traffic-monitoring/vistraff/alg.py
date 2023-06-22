@@ -233,13 +233,13 @@ class VehicleTracking(object):
 
         # Predictors
         self.classes: t.List[int] = [2, 3, 5, 7]
-        self.detector_yolo = YOLO(model='yolov8n.pt', task='detect')
+        self.detector_yolo = YOLO(model=str(self.assets.weights_yolo), task='detect')
         self.detector_frcnn = FasterRCNNMOD(device=device, box_score_thresh=0.25, box_nms_thresh=0.10)
 
         # Trackers
         self.frame = -1
         self.tracker = OCSort()
-        self.max_frames_lost = 25 # TODO! More, less?
+        self.max_frames_lost = 35 # TODO! More, less?
         self.tracks = VehicleTracks(method='yolo_bytetrack')
 
     def __call__(self, data: CarTrafficTaskTwoDict) -> t.Tuple[int, int, int, int] | None:
@@ -273,7 +273,7 @@ class VehicleTracking(object):
 
             # The entity might change across the video
             return self.missing_id(image, bboxes, ids)
-        except AssertionError as _: # TODO: -> Exception
+        except Exception as _:
             self.tracks.frame = self.frame
             if len(self.tracks.path) != 0:
                 return self.tracks.bbox_tuple()

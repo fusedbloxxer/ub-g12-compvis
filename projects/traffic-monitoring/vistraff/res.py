@@ -12,10 +12,7 @@ class Assets(object):
         self.lane_masks, self.lanes_mask = Assets.read_masks(assets_path / 'masks')
         self.bg_static: np.ndarray = Assets.read_static_bgs(assets_path / 'backgrounds')
         self.weights_path: pb.Path = assets_path / 'weights'
-        self.trackers_path: pb.Path = assets_path / 'trackers'
-        self.trackers: t.Dict[str, pb.Path] = {
-            'bytetrack': self.trackers_path / 'bytetrack.yaml',
-        }
+        self.weights_yolo = self.weights_path / 'yolo' / 'yolov8n.pt'
 
         # Dataset Info
         self.image_width = 1920
